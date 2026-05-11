@@ -856,6 +856,223 @@
     .setting-input:focus {
       border-color: var(--border-focus);
     }
+
+    /* ===== AGENTS PANEL ===== */
+    .agent-form {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .agent-form-row {
+      padding: 0 14px;
+    }
+    .agent-form-row:first-child {
+      padding-top: 12px;
+    }
+    .agent-type-select {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-input);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .agent-type-select:focus {
+      border-color: var(--border-focus);
+    }
+    .agent-input {
+      width: 100%;
+      min-height: 72px;
+      max-height: 200px;
+      padding: 10px 14px;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 12.5px;
+      font-family: inherit;
+      line-height: 1.5;
+      resize: vertical;
+      outline: none;
+      margin-top: 8px;
+    }
+    .agent-input::placeholder { color: var(--text-muted); }
+    .agent-form-footer {
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .refresh-btn {
+      width: 24px;
+      height: 24px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-card);
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .refresh-btn:hover {
+      border-color: var(--border-hover);
+      color: var(--text-secondary);
+      background: var(--bg-card-hover);
+    }
+    .refresh-btn.spinning svg {
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .agent-execution-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      margin-bottom: 6px;
+      transition: all 0.15s;
+    }
+    .agent-execution-card:hover {
+      border-color: var(--border-hover);
+    }
+    .agent-execution-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .agent-execution-type {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .agent-execution-status {
+      font-size: 10px;
+      padding: 1px 8px;
+      border-radius: 99px;
+    }
+    .agent-execution-status.completed {
+      background: rgba(16, 185, 129, 0.12);
+      color: var(--accent);
+    }
+    .agent-execution-status.running {
+      background: rgba(6, 182, 212, 0.12);
+      color: var(--cyan);
+    }
+    .agent-execution-status.failed {
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--danger);
+    }
+    .agent-execution-input {
+      font-size: 11px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .agent-execution-time {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .continuation-card {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(6, 182, 212, 0.06) 100%);
+      border: 1px solid rgba(16, 185, 129, 0.15);
+      border-radius: var(--radius);
+      padding: 12px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .continuation-card:hover {
+      border-color: rgba(16, 185, 129, 0.3);
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(6, 182, 212, 0.1) 100%);
+    }
+    .continuation-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+    .continuation-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+    .agent-quick-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .agent-action-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .agent-action-btn:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+    .agent-action-btn svg { flex-shrink: 0; }
+
+    /* ===== AUTH STATUS ===== */
+    .auth-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 10px;
+      border-radius: 99px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      transition: all 0.15s;
+    }
+    .auth-indicator:hover {
+      border-color: var(--border-hover);
+      color: var(--text-secondary);
+    }
+    .auth-indicator.connected {
+      border-color: rgba(16, 185, 129, 0.3);
+      color: var(--accent);
+    }
+    .auth-indicator .auth-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .auth-indicator.connected .auth-dot {
+      background: var(--accent);
+      box-shadow: 0 0 4px var(--accent-glow);
+    }
   </style>
 </head>
 <body>
@@ -876,6 +1093,10 @@
         <div class="nav-item" data-panel="memories" role="button" tabindex="0" aria-label="Memories">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span class="tooltip">Memories</span>
+        </div>
+        <div class="nav-item" data-panel="agents" role="button" tabindex="0" aria-label="Agents">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22"/><path d="M12 2a4 4 0 0 0-4 4c0 1.95 1.4 3.58 3.25 3.93"/><path d="M8.56 13.68C5.94 14.93 4 17.26 4 20h16c0-2.74-1.94-5.07-4.56-6.32"/></svg>
+          <span class="tooltip">Agents</span>
         </div>
         <div class="nav-item" data-panel="notes" role="button" tabindex="0" aria-label="Notes">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -900,6 +1121,10 @@
         <div class="top-bar-row">
           <div class="top-bar-title" id="panelTitle">Dashboard <span id="panelSubtitle"></span></div>
           <div class="top-bar-actions">
+            <div class="auth-indicator" id="authIndicator" title="Click to manage auth">
+              <div class="auth-dot"></div>
+              <span id="authLabel">Offline</span>
+            </div>
             <div class="tracking-toggle" id="trackingToggle">
               <div class="toggle active" id="trackingSwitch"></div>
               <span id="trackingText">Tracking</span>
@@ -964,6 +1189,71 @@
           <div class="skeleton" style="height:64px;"></div>
         </div>
         <button class="load-more" id="loadMoreMemories" style="display:none;">Load more memories</button>
+      </div>
+
+      <!-- Agents Panel -->
+      <div class="panel" id="panel-agents">
+        <div class="section-header">
+          <div class="section-title">AI Agents</div>
+          <div class="section-count" id="agentsCount">—</div>
+        </div>
+
+        <!-- Agent execution form -->
+        <div class="agent-form">
+          <div class="agent-form-row">
+            <select class="agent-type-select" id="agentTypeSelect">
+              <option value="research">🔍 Research Agent</option>
+              <option value="summarize">📝 Summarize Agent</option>
+              <option value="code">💻 Code Agent</option>
+              <option value="organize">📋 Organize Agent</option>
+              <option value="workflow">🔄 Workflow Agent</option>
+            </select>
+          </div>
+          <div class="agent-form-row">
+            <textarea class="agent-input" id="agentInput" placeholder="Describe what you want the agent to do..." rows="3" maxlength="2000"></textarea>
+          </div>
+          <div class="agent-form-footer">
+            <button class="save-note-btn" id="executeAgentBtn">Execute Agent</button>
+          </div>
+        </div>
+
+        <!-- Continuation suggestions -->
+        <div class="section-header" style="margin-top:16px;">
+          <div class="section-title">Continuations</div>
+          <button class="refresh-btn" id="checkContinuationsBtn" title="Check for interrupted work">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        </div>
+        <div id="continuationsList">
+          <div class="empty-state" style="padding:16px 0;">
+            <p>No continuation suggestions yet.</p>
+          </div>
+        </div>
+
+        <!-- Recent executions -->
+        <div class="section-header" style="margin-top:16px;">
+          <div class="section-title">Recent Executions</div>
+        </div>
+        <div id="agentExecutionsList">
+          <div class="empty-state" style="padding:16px 0;">
+            <p>No agent executions yet.</p>
+          </div>
+        </div>
+
+        <!-- Quick actions -->
+        <div class="section-header" style="margin-top:16px;">
+          <div class="section-title">Quick Actions</div>
+        </div>
+        <div class="agent-quick-actions">
+          <button class="agent-action-btn" id="captureScreenshotBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            Capture Screenshot
+          </button>
+          <button class="agent-action-btn" id="syncNowBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Sync Now
+          </button>
+        </div>
       </div>
 
       <!-- Notes Panel -->

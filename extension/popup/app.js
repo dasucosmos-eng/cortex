@@ -22,6 +22,14 @@
     openDashboardBtn: document.getElementById('openDashboardBtn'),
     clearDataBtn: document.getElementById('clearDataBtn'),
     contentArea: document.getElementById('contentArea'),
+    // New elements
+    authDot: document.getElementById('authDot'),
+    authStatusText: document.getElementById('authStatusText'),
+    syncDot: document.getElementById('syncDot'),
+    syncStatusText: document.getElementById('syncStatusText'),
+    agentsBadge: document.getElementById('agentsBadge'),
+    agentsRunningCount: document.getElementById('agentsRunningCount'),
+    syncNowBtn: document.getElementById('syncNowBtn'),
   };
 
   let state = {
@@ -96,6 +104,76 @@
     renderStatus(response.data);
     await loadMemories();
   }
+
+  // ===== AUTH & SYNC =====
+
+  async function loadAuthAndSync() {
+    // Auth status
+    const authResponse = await sendMessage('GET_AUTH_STATUS');
+    if (authResponse.success) {
+      const { isAuthenticated } = authResponse.data;
+      if (isAuthenticated) {
+        els.authDot.className = 'indicator-dot online';
+        els.authStatusText.textContent = 'Connected';
+      } else {
+        els.authDot.className = 'indicator-dot offline';
+        els.authStatusText.textContent = 'Offline';
+      }
+    }
+
+    // Sync status
+    const syncResponse = await sendMessage('GET_SYNC_STATUS');
+    if (syncResponse.success) {
+      const data = syncResponse.data;
+      if (data.status === 'connected' && data.lastSync) {
+        els.syncDot.className = 'indicator-dot online';
+        els.syncStatusText.textContent = `Synced ${timeAgo(data.lastSync)}`;
+      } else if (data.status === 'syncing') {
+        els.syncDot.className = 'indicator-dot syncing';
+        els.syncStatusText.textContent = 'Syncing...';
+      } else {
+        els.syncDot.className = 'indicator-dot offline';
+        els.syncStatusText.textContent = 'Not synced';
+      }
+    }
+
+    // Agents count
+    const agentsResponse = await sendMessage('GET_AGENT_EXECUTIONS');
+    if (agentsResponse.success && agentsResponse.data) {
+      const runningCount = agentsResponse.data.filter(e => e.status === 'running').length;
+      if (runningCount > 0) {
+        els.agentsBadge.style.display = 'flex';
+        els.agentsRunningCount.textContent = runningCount;
+      } else {
+        els.agentsBadge.style.display = 'none';
+      }
+    }
+  }
+
+  async function handleSyncNow() {
+    els.syncDot.className = 'indicator-dot syncing';
+    els.syncStatusText.textContent = 'Syncing...';
+
+    const response = await sendMessage('SYNC_NOW');
+    if (response.success) {
+      const data = response.data;
+      if (data.status === 'connected') {
+        els.syncDot.className = 'indicator-dot online';
+        els.syncStatusText.textContent = 'Just synced';
+      } else if (data.status === 'offline') {
+        els.syncDot.className = 'indicator-dot offline';
+        els.syncStatusText.textContent = 'Not authenticated';
+      } else {
+        els.syncDot.className = 'indicator-dot offline';
+        els.syncStatusText.textContent = 'Sync failed';
+      }
+    } else {
+      els.syncDot.className = 'indicator-dot offline';
+      els.syncStatusText.textContent = 'Sync failed';
+    }
+  }
+
+  // ===== RENDER STATUS =====
 
   function renderStatus(data) {
     // Stats
@@ -331,8 +409,10 @@
   els.openSidebarBtn.addEventListener('click', openSidePanel);
   els.openDashboardBtn.addEventListener('click', openDashboard);
   els.clearDataBtn.addEventListener('click', clearData);
+  if (els.syncNowBtn) els.syncNowBtn.addEventListener('click', handleSyncNow);
 
   // ===== INIT =====
   loadStatus();
+  loadAuthAndSync();
 
 })();

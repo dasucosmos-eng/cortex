@@ -13,7 +13,8 @@
     "scripting",
     "webNavigation",
     "alarms",
-    "contextMenus"
+    "contextMenus",
+    "identity"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

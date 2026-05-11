@@ -7,23 +7,100 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============ AUTH & ACCOUNTS ============
+
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  name               String?
+  image              String?
+  password           String?
+  emailVerified      DateTime?
+  role               String   @default("user") // user, admin
+  plan               String   @default("free") // free, pro, enterprise
+  preferences        String?  // JSON: { privacyMode, aiModel, trackingSettings, ... }
+  onboardingComplete Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  accounts           Account[]
+  sessions           SessionToken[]
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String  // google, github, email, etc
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
 }
+
+model SessionToken {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String   @unique
+  expires      DateTime
+  createdAt    DateTime @default(now())
+}
+
+// ============ ORGANIZATIONS & TEAMS ============
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?
+  plan        String   @default("free") // free, pro, enterprise
+  maxMembers  Int      @default(5)
+  maxStorage  Int      @default(1073741824) // 1GB in bytes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     OrgMember[]
+  workspaces  Workspace[]
+  auditLogs   AuditLog[]
+}
+
+model OrgMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  role           String       @default("member") // owner, admin, member, viewer
+  permissions    String?      // JSON: { memories: "read_write", agents: "read_only", ... }
+  joinedAt       DateTime     @default(now())
+
+  @@unique([organizationId, userId])
+}
+
+model Workspace {
+  id             String        @id @default(cuid())
+  name           String
+  description    String?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  userId         String?       // For personal workspaces
+  isDefault      Boolean       @default(false)
+  settings       String?       // JSON workspace settings
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+// ============ SESSIONS & MEMORIES (Original) ============
 
 model Session {
   id          String   @id @default(cuid())
@@ -36,6 +113,7 @@ model Session {
   endedAt     DateTime?
   isActive    Boolean  @default(true)
   tabCount    Int      @default(1)
+  userId      String?
   memories    Memory[]
   timeline    TimelineEvent[]
 }
@@ -55,6 +133,7 @@ model Memory {
   tags        String?  // JSON array string
   embedding   String?  // Base64 encoded embedding vector
   isSensitive Boolean  @default(false)
+  userId      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   relatedFrom MemoryRelation[] @relation("MemoryRelationFrom")
@@ -92,6 +171,7 @@ model Project {
   color       String   @default("#6366f1")
   icon        String?
   isActive    Boolean  @default(true)
+  userId      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -104,6 +184,7 @@ model VaultItem {
   domain        String?  // Which website this belongs to
   iv            String   // Initialization vector
   authTag       String   // Auth tag
+  userId        String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -115,6 +196,7 @@ model AIDailySummary {
   topics    String?  // JSON array
   projects  String?  // JSON array
   stats     String?  // JSON object
+  userId    String?
   createdAt DateTime @default(now())
 }
 
@@ -123,5 +205,157 @@ model SearchQuery {
   query     String
   results   String?  // JSON array of memory IDs
   filters   String?  // JSON object
+  userId    String?
   createdAt DateTime @default(now())
+}
+
+// ============ KNOWLEDGE GRAPH ============
+
+model KnowledgeNode {
+  id          String   @id @default(cuid())
+  userId      String?
+  type        String   // project, concept, tab, person, file, repository, conversation, task, workflow, technology, decision
+  label       String
+  description String?
+  metadata    String?  // JSON: { url, domain, icon, color, ... }
+  importance  Float    @default(1.0) // 0.0-10.0 importance score
+  x           Float?   // Position for graph visualization
+  y           Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  edgesFrom   KnowledgeEdge[] @relation("EdgeFrom")
+  edgesTo     KnowledgeEdge[] @relation("EdgeTo")
+}
+
+model KnowledgeEdge {
+  id        String        @id @default(cuid())
+  fromId    String
+  toId      String
+  from      KnowledgeNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to        KnowledgeNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
+  type      String        @default("related") // related-to, caused-by, solved-by, referenced-in, continuation-of, depends-on, part-of, extends
+  strength  Float         @default(1.0) // 0.0-1.0
+  metadata  String?       // JSON
+  createdAt DateTime      @default(now())
+
+  @@unique([fromId, toId, type])
+}
+
+// ============ AI AGENTS ============
+
+model AgentExecution {
+  id          String   @id @default(cuid())
+  userId      String?
+  agentType   String   // research, coding, summarization, timeline, curator, optimizer, connector, debugging
+  status      String   @default("pending") // pending, running, completed, failed, cancelled
+  input       String? // JSON input
+  output      String? // JSON output
+  error       String?
+  contextSize Int      @default(0) // Tokens used
+  duration    Int      @default(0) // Milliseconds
+  model       String?  // Which AI model was used
+  sessionId   String?
+  memoryId    String?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+}
+
+// ============ HYBRID MEMORY ============
+
+model HybridMemory {
+  id             String   @id @default(cuid())
+  memoryId       String?  // Link to original Memory
+  memoryTier     String   // short_term, long_term, episodic, semantic, procedural
+  importance     Float    @default(5.0) // 0.0-10.0
+  accessCount    Int      @default(0)
+  lastAccessed   DateTime @default(now())
+  decayRate      Float    @default(0.01) // How fast this memory fades
+  isArchived     Boolean  @default(false)
+  isDuplicate    Boolean  @default(false)
+  parentMemoryId String?  // For compressed/deduplicated memories
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ============ WORKFLOW STATE ============
+
+model WorkflowState {
+  id              String   @id @default(cuid())
+  userId          String?
+  type            String   // coding_session, research_session, debugging, design, meeting, writing
+  projectId       String?
+  status          String   @default("active") // active, interrupted, completed, abandoned
+  title           String?
+  description     String?
+  contextSnapshot String? // JSON: Full context at interruption point
+  tabSnapshot     String? // JSON: List of open tabs
+  aiSummary       String?
+  nextSteps       String? // JSON: Suggested continuation steps
+  startedAt       DateTime @default(now())
+  interruptedAt   DateTime?
+  resumedAt       DateTime?
+  completedAt     DateTime?
+}
+
+// ============ PRODUCTIVITY ============
+
+model ProductivityInsight {
+  id          String   @id @default(cuid())
+  userId      String?
+  date        String   // YYYY-MM-DD
+  type        String   // deep_work, distraction, context_switch, productive_pattern, inefficiency, suggestion
+  title       String
+  description String?
+  metric      String?  // JSON: { value: 4.5, unit: "hours", ... }
+  action      String?  // Suggested action
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// ============ MEMORY IMPORT ============
+
+model MemoryImport {
+  id            String   @id @default(cuid())
+  userId        String?
+  source        String   // github, notion, slack, linear, google_docs, vscode, discord, jira, figma
+  sourceId      String?  // External ID
+  externalUrl   String?
+  status        String   @default("pending") // pending, processing, completed, failed
+  itemsImported Int      @default(0)
+  itemsFailed   Int      @default(0)
+  error         String?
+  metadata      String? // JSON: auth info, sync settings
+  lastSyncAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============ SYNC STATE ============
+
+model SyncState {
+  id          String   @id @default(cuid())
+  userId      String?
+  deviceId    String   // Unique device identifier
+  deviceName  String?  // "MacBook Pro", "Chrome Desktop", etc
+  lastSyncAt  DateTime @default(now())
+  syncVersion Int      @default(0) // Incremental version for conflict resolution
+  status      String   @default("synced") // synced, syncing, conflict, offline
+  pendingOps  Int      @default(0) // Number of pending sync operations
+}
+
+// ============ AUDIT LOG ============
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  userId         String?
+  action         String        // memory_created, memory_deleted, vault_access, agent_run, settings_changed, member_added
+  resource       String?       // What was affected
+  resourceId     String?
+  details        String?      // JSON
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime      @default(now())
 }

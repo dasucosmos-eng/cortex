@@ -1206,6 +1206,111 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
 
+        // ---- Auth messages ----
+        case 'AUTHENTICATE': {
+          const result = await authenticate(message.email, message.password);
+          sendResponse({ success: result.success, data: result });
+          break;
+        }
+
+        case 'GET_AUTH_STATUS': {
+          sendResponse({
+            success: true,
+            data: {
+              isAuthenticated: AUTH_STATE.isAuthenticated,
+              userId: AUTH_STATE.userId,
+              serverUrl: AUTH_STATE.serverUrl,
+            },
+          });
+          break;
+        }
+
+        case 'LOGOUT': {
+          AUTH_STATE.isAuthenticated = false;
+          AUTH_STATE.userId = null;
+          AUTH_STATE.token = null;
+          await setStorage('authToken', null);
+          sendResponse({ success: true });
+          break;
+        }
+
+        // ---- Sync messages ----
+        case 'SYNC_NOW': {
+          const syncResult = await syncData();
+          sendResponse({ success: true, data: syncResult });
+          break;
+        }
+
+        case 'GET_SYNC_STATUS': {
+          const syncStatus = await getSyncStatus();
+          sendResponse({ success: true, data: syncStatus });
+          break;
+        }
+
+        case 'REGISTER_DEVICE': {
+          const deviceResult = await registerDevice();
+          sendResponse({ success: true, data: deviceResult });
+          break;
+        }
+
+        // ---- Agent messages ----
+        case 'EXECUTE_AGENT': {
+          const agentResult = await executeAgent(message.agentType, message.input);
+          sendResponse({ success: true, data: agentResult });
+          break;
+        }
+
+        case 'GET_AGENT_EXECUTIONS': {
+          const executions = await getAgentExecutions();
+          sendResponse({ success: true, data: executions });
+          break;
+        }
+
+        case 'GET_CONTINUATION': {
+          const suggestions = await checkContinuationSuggestions();
+          sendResponse({ success: true, data: suggestions });
+          break;
+        }
+
+        // ---- Multi-modal messages ----
+        case 'CAPTURE_SCREENSHOT': {
+          const screenshotResult = await captureScreenshot(message.tabId);
+          sendResponse({ success: true, data: screenshotResult });
+          break;
+        }
+
+        case 'PROCESS_IMAGE': {
+          const imageResult = await processImage(message.imageData);
+          sendResponse({ success: true, data: imageResult });
+          break;
+        }
+
+        // ---- Knowledge Graph messages ----
+        case 'GET_KNOWLEDGE_GRAPH': {
+          const graphData = await getKnowledgeGraph();
+          sendResponse({ success: true, data: graphData });
+          break;
+        }
+
+        case 'TRIGGER_GRAPH_REBUILD': {
+          const rebuildResult = await triggerGraphRebuild();
+          sendResponse({ success: true, data: rebuildResult });
+          break;
+        }
+
+        // ---- Import messages ----
+        case 'GET_CONNECTORS': {
+          const connectors = await getAvailableConnectors();
+          sendResponse({ success: true, data: connectors });
+          break;
+        }
+
+        case 'CREATE_IMPORT': {
+          const importResult = await createImport(message.source, message.externalUrl);
+          sendResponse({ success: true, data: importResult });
+          break;
+        }
+
         default:
           sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
       }
@@ -1283,6 +1388,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       }, 2000);
     }
   }
+
+  if (info.menuItemId === 'capture-screenshot-cortex') {
+    await captureScreenshot(tab?.id);
+  }
 });
 
 // Alarms
@@ -1296,6 +1405,18 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name === 'endInactiveSessions') {
     await endInactiveSessions();
+  }
+
+  if (alarm.name === 'periodicSync') {
+    if (AUTH_STATE.isAuthenticated) {
+      await syncData();
+    }
+  }
+
+  if (alarm.name === 'checkContinuations') {
+    if (AUTH_STATE.isAuthenticated) {
+      await checkContinuationSuggestions();
+    }
   }
 });
 
@@ -1334,12 +1455,19 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // Create periodic alarms
   chrome.alarms.create('processActivity', { periodInMinutes: 5 });
   chrome.alarms.create('endInactiveSessions', { periodInMinutes: 30 });
+  chrome.alarms.create('periodicSync', { periodInMinutes: 5 });
+  chrome.alarms.create('checkContinuations', { periodInMinutes: 10 });
 
-  // Create context menu
+  // Create context menus
   chrome.contextMenus.create({
     id: 'save-to-cortex',
     title: 'Save to Cortex',
     contexts: ['selection', 'page', 'link'],
+  });
+  chrome.contextMenus.create({
+    id: 'capture-screenshot-cortex',
+    title: 'Capture Screenshot to Cortex',
+    contexts: ['page'],
   });
 
   // Run initial history analysis
@@ -1347,6 +1475,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
   // Open side panel action
   chrome.action.setBadgeText({ text: '' });
+
+  // Auto-authenticate from stored token
+  await restoreAuth();
 });
 
 // Handle extension startup (browser restart)
@@ -1361,6 +1492,9 @@ chrome.runtime.onStartup.addListener(async () => {
       await ensureActiveSession(activeTab);
     }
   }
+
+  // Restore auth on startup
+  await restoreAuth();
 });
 
 // Open side panel when action icon is clicked (can be triggered by popup)
@@ -1369,5 +1503,516 @@ chrome.action.onClicked.addListener(async (tab) => {
   // So this is a fallback
   await chrome.sidePanel.open({ windowId: tab.windowId });
 });
+
+// ===== AUTH MODULE =====
+
+const AUTH_STATE = {
+  isAuthenticated: false,
+  userId: null,
+  token: null,
+  serverUrl: 'http://localhost:3000',
+};
+
+async function authenticate(email, password) {
+  try {
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/auth/callback/credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, redirect: false }),
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `Authentication failed: ${response.status}` };
+    }
+
+    const data = await response.json();
+    AUTH_STATE.isAuthenticated = true;
+    AUTH_STATE.userId = data.user?.id || email;
+    AUTH_STATE.token = data.token || data.sessionToken;
+
+    if (AUTH_STATE.token) {
+      await setStorage('authToken', AUTH_STATE.token);
+      await setStorage('authUserId', AUTH_STATE.userId);
+    }
+
+    // Register device after successful auth
+    await registerDevice();
+
+    // Trigger initial sync
+    await syncData();
+
+    console.log('[Cortex] Authenticated successfully');
+    return { success: true, userId: AUTH_STATE.userId };
+  } catch (err) {
+    console.error('[Cortex] Authentication error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function getAuthToken() {
+  if (AUTH_STATE.token) return AUTH_STATE.token;
+  const token = await getStorage('authToken');
+  if (token) {
+    AUTH_STATE.token = token;
+    AUTH_STATE.userId = await getStorage('authUserId');
+    AUTH_STATE.isAuthenticated = true;
+  }
+  return token;
+}
+
+async function restoreAuth() {
+  const token = await getAuthToken();
+  if (token) {
+    AUTH_STATE.isAuthenticated = true;
+    console.log('[Cortex] Auth restored from stored token');
+  }
+}
+
+// ===== SYNC MODULE =====
+
+const syncState = {
+  deviceId: null,
+  deviceName: `${typeof navigator !== 'undefined' ? navigator.platform : 'Unknown'} - Chrome`,
+  lastSync: null,
+  syncVersion: 0,
+  status: 'offline',
+};
+
+async function registerDevice() {
+  try {
+    if (!AUTH_STATE.token) return;
+
+    syncState.deviceId = syncState.deviceId || await getStorage('syncDeviceId') || generateId();
+    await setStorage('syncDeviceId', syncState.deviceId);
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+      body: JSON.stringify({
+        deviceId: syncState.deviceId,
+        deviceName: syncState.deviceName,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      syncState.syncVersion = data.syncVersion || 0;
+      syncState.status = 'connected';
+      await setStorage('syncVersion', syncState.syncVersion);
+      console.log('[Cortex] Device registered for sync');
+    }
+  } catch (err) {
+    console.error('[Cortex] Device registration failed:', err);
+    syncState.status = 'error';
+  }
+}
+
+async function syncData() {
+  try {
+    if (!AUTH_STATE.token) {
+      syncState.status = 'offline';
+      return { status: 'offline' };
+    }
+
+    syncState.status = 'syncing';
+
+    const currentVersion = await getStorage('syncVersion') || 0;
+    const memories = (await getStorage(STORAGE_KEYS.MEMORIES)) || [];
+    const sessions = (await getStorage(STORAGE_KEYS.SESSIONS)) || [];
+    const timeline = (await getStorage(STORAGE_KEYS.TIMELINE)) || [];
+
+    // Collect local changes
+    const localChanges = {
+      memories: memories.slice(-50), // Last 50 memories
+      sessions: sessions.filter(s => s.status === 'ended').slice(-20),
+      timeline: timeline.slice(-100),
+    };
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/sync`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+      body: JSON.stringify({
+        deviceId: syncState.deviceId,
+        syncVersion: currentVersion,
+        changes: localChanges,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      syncState.syncVersion = data.syncVersion || currentVersion;
+      syncState.lastSync = getTimestamp();
+      syncState.status = 'connected';
+      await setStorage('syncVersion', syncState.syncVersion);
+      await setStorage('lastSyncTime', syncState.lastSync);
+
+      // Process remote changes
+      if (data.remoteChanges) {
+        await processRemoteChanges(data.remoteChanges);
+      }
+
+      console.log('[Cortex] Sync completed successfully');
+      return { status: 'connected', syncVersion: syncState.syncVersion, lastSync: syncState.lastSync };
+    }
+
+    syncState.status = 'error';
+    return { status: 'error' };
+  } catch (err) {
+    console.error('[Cortex] Sync failed:', err);
+    syncState.status = 'error';
+    return { status: 'error', error: err.message };
+  }
+}
+
+async function processRemoteChanges(remoteChanges) {
+  // Merge remote memories
+  if (remoteChanges.memories && remoteChanges.memories.length > 0) {
+    const localMemories = (await getStorage(STORAGE_KEYS.MEMORIES)) || [];
+    const localIds = new Set(localMemories.map(m => m.id));
+
+    let added = 0;
+    for (const memory of remoteChanges.memories) {
+      if (!localIds.has(memory.id)) {
+        localMemories.push(memory);
+        added++;
+      }
+    }
+
+    if (added > 0) {
+      await setStorage(STORAGE_KEYS.MEMORIES, localMemories.slice(-MAX_MEMORIES));
+      console.log(`[Cortex] Merged ${added} remote memories`);
+    }
+  }
+}
+
+async function getSyncStatus() {
+  const lastSync = await getStorage('lastSyncTime');
+  const syncVersion = await getStorage('syncVersion');
+  return {
+    deviceId: syncState.deviceId,
+    deviceName: syncState.deviceName,
+    lastSync,
+    syncVersion: syncVersion || 0,
+    status: syncState.status,
+    isAuthenticated: AUTH_STATE.isAuthenticated,
+  };
+}
+
+// ===== AGENT BRIDGE MODULE =====
+
+async function executeAgent(agentType, input) {
+  try {
+    if (!AUTH_STATE.token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/agents`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+      body: JSON.stringify({ agentType, input }),
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `Agent execution failed: ${response.status}` };
+    }
+
+    const data = await response.json();
+
+    // Store execution in local storage
+    const execution = {
+      id: data.id || generateId(),
+      agentType,
+      input,
+      result: data.result,
+      status: data.status || 'completed',
+      timestamp: getTimestamp(),
+    };
+    await addToStorage('agentExecutions', execution, 100);
+
+    return { success: true, data: execution };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function getAgentExecutions() {
+  const executions = (await getStorage('agentExecutions')) || [];
+  return executions.slice(-20).reverse();
+}
+
+async function checkContinuationSuggestions() {
+  try {
+    if (!AUTH_STATE.token) {
+      return { suggestions: [] };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/workflow/continuation`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      return { suggestions: [] };
+    }
+
+    const data = await response.json();
+
+    if (data.suggestions && data.suggestions.length > 0) {
+      // Show notification for interrupted work
+      chrome.notifications?.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Cortex — Work Continuation',
+        message: `You have ${data.suggestions.length} interrupted task${data.suggestions.length > 1 ? 's' : ''}. Click to continue.`,
+      });
+    }
+
+    return { suggestions: data.suggestions || [] };
+  } catch (err) {
+    console.error('[Cortex] Continuation check failed:', err);
+    return { suggestions: [] };
+  }
+}
+
+// ===== MULTI-MODAL MEMORY MODULE =====
+
+async function captureScreenshot(tabId) {
+  try {
+    if (!tabId) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      tabId = activeTab?.id;
+    }
+    if (!tabId) {
+      return { success: false, error: 'No active tab' };
+    }
+
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+
+    // Get tab info for context
+    const tab = await chrome.tabs.get(tabId);
+    const metadata = {
+      url: tab?.url,
+      title: tab?.title,
+      domain: getDomain(tab?.url),
+      timestamp: getTimestamp(),
+    };
+
+    // Store locally
+    const screenshot = {
+      id: generateId(),
+      type: 'screenshot',
+      dataUrl,
+      metadata,
+      timestamp: getTimestamp(),
+      processed: false,
+    };
+    await addToStorage('screenshots', screenshot, 50);
+
+    // Send to server for AI analysis
+    if (AUTH_STATE.isAuthenticated) {
+      await processImage(dataUrl);
+    }
+
+    // Show badge confirmation
+    chrome.action.setBadgeText({ text: '📸', tabId });
+    chrome.action.setBadgeBackgroundColor({ color: '#06b6d4', tabId });
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: '', tabId });
+    }, 2000);
+
+    console.log('[Cortex] Screenshot captured');
+    return { success: true, screenshotId: screenshot.id };
+  } catch (err) {
+    console.error('[Cortex] Screenshot capture failed:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function processImage(imageData) {
+  try {
+    if (!AUTH_STATE.token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/memory/process-image`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+      body: JSON.stringify({ imageData }),
+    });
+
+    if (!response.ok) {
+      return { success: false, error: 'Image processing failed' };
+    }
+
+    const data = await response.json();
+
+    // Store AI analysis as a memory
+    if (data.description || data.text) {
+      await saveManualMemory({
+        text: data.description || data.text,
+        title: `Visual Memory: ${data.description?.substring(0, 60) || 'Screenshot Analysis'}`,
+        type: 'visual',
+        source: 'screenshot_analysis',
+        tags: ['visual', 'screenshot', 'ai-analyzed'],
+      });
+    }
+
+    return { success: true, data };
+  } catch (err) {
+    console.error('[Cortex] Image processing failed:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function recordAudio() {
+  // Placeholder for voice note capture via content script
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) return { success: false, error: 'No active tab' };
+
+    await chrome.tabs.sendMessage(activeTab.id, {
+      type: 'START_AUDIO_RECORDING',
+    });
+
+    return { success: true, message: 'Audio recording started in content script' };
+  } catch (err) {
+    return { success: false, error: 'Content script not available for audio recording' };
+  }
+}
+
+// ===== KNOWLEDGE GRAPH SYNC =====
+
+async function getKnowledgeGraph() {
+  try {
+    const cached = await getStorage('knowledgeGraphCache');
+    const cacheTime = await getStorage('knowledgeGraphCacheTime');
+
+    // Return cached data if less than 10 minutes old
+    if (cached && cacheTime && (getTimestamp() - cacheTime) < 10 * 60 * 1000) {
+      return cached;
+    }
+
+    if (!AUTH_STATE.token) {
+      return cached || { nodes: [], edges: [] };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/knowledge-graph`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      return cached || { nodes: [], edges: [] };
+    }
+
+    const data = await response.json();
+    await setStorage('knowledgeGraphCache', data);
+    await setStorage('knowledgeGraphCacheTime', getTimestamp());
+    return data;
+  } catch (err) {
+    console.error('[Cortex] Knowledge graph fetch failed:', err);
+    const cached = await getStorage('knowledgeGraphCache');
+    return cached || { nodes: [], edges: [] };
+  }
+}
+
+async function triggerGraphRebuild() {
+  try {
+    if (!AUTH_STATE.token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/knowledge-graph`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+    });
+
+    // Clear cache
+    await setStorage('knowledgeGraphCache', null);
+    await setStorage('knowledgeGraphCacheTime', null);
+
+    if (!response.ok) {
+      return { success: false, error: 'Graph rebuild failed' };
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ===== MEMORY IMPORT BRIDGE =====
+
+async function getAvailableConnectors() {
+  try {
+    if (!AUTH_STATE.token) {
+      return { connectors: [
+        { id: 'notion', name: 'Notion', icon: '📝', description: 'Import pages and databases from Notion' },
+        { id: 'google-docs', name: 'Google Docs', icon: '📄', description: 'Import documents from Google Drive' },
+        { id: 'obsidian', name: 'Obsidian', icon: '💎', description: 'Import markdown notes from Obsidian vaults' },
+        { id: 'bookmark', name: 'Browser Bookmarks', icon: '🔖', description: 'Import your Chrome bookmarks' },
+        { id: 'csv', name: 'CSV / Spreadsheet', icon: '📊', description: 'Import data from CSV files' },
+      ] };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/import/connectors`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      return { connectors: [] };
+    }
+
+    return await response.json();
+  } catch (err) {
+    console.error('[Cortex] Failed to get connectors:', err);
+    return { connectors: [] };
+  }
+}
+
+async function createImport(source, externalUrl) {
+  try {
+    if (!AUTH_STATE.token) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const response = await fetch(`${AUTH_STATE.serverUrl}/api/import`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${AUTH_STATE.token}`,
+      },
+      body: JSON.stringify({ source, externalUrl }),
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `Import failed: ${response.status}` };
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
 
 console.log('[Cortex] Background service worker loaded');

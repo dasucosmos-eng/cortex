@@ -1,104 +1,206 @@
-# Cortex — AI Browser Memory Extension
+# Cortex — AI Cognitive Operating System
 
-## Project Summary
+## Evolution Summary
 
-A production-grade AI-powered browser extension that acts as an intelligent memory system and context engine for the user's browser activity. Built as a complete full-stack system with a Next.js companion dashboard and Chrome MV3 browser extension.
+Transformed from a browser memory extension into a next-generation AI-powered cognitive operating system. The browser evolves from "a collection of tabs" into "a persistent intelligent workspace with memory, contextual understanding, and autonomous AI agents."
 
-## Architecture
+---
 
-### Next.js Dashboard (Port 3000)
-- **Tech**: Next.js 16, TypeScript, TailwindCSS 4, shadcn/ui, Framer Motion, Zustand
-- **Purpose**: Companion dashboard for viewing memories, timelines, projects, AI context, and vault
-- **UI**: Dark-mode glassmorphism design inspired by Arc Browser, Raycast, Linear
+## Architecture Overview
 
-### Chrome Browser Extension
+### Next.js 16 Dashboard
+- **Tech**: Next.js 16, TypeScript, TailwindCSS 4, shadcn/ui, Framer Motion, Zustand, NextAuth
+- **UI**: Dark glassmorphism design with 13 navigation views, responsive layout
+- **Views**: Dashboard, Current Work, Teams, Projects, Analytics, Timeline, Memories, Search, Knowledge Graph, AI Assistant, Agents, Vault, Settings
+
+### Chrome Browser Extension (MV3)
 - **Tech**: Chrome Manifest V3, Vanilla JS, CSS3
-- **Purpose**: Tracks browser activity, extracts context, manages sessions, stores memories
-- **Components**: Background service worker, content scripts, popup, sidebar panel
+- **Components**: Background service worker (2018 lines), content scripts, popup (640 lines), sidebar (1333 lines)
+- **Features**: Tab tracking, session management, auth bridge, sync module, agent bridge, multi-modal capture
 
-### Backend API
+### Backend API (30+ routes)
 - **Tech**: Next.js API Routes, Prisma ORM, z-ai-web-dev-sdk
-- **Purpose**: Memory management, AI recall, semantic search, encryption vault, context capsules
+- **AI**: Agent orchestration, contextual routing, workflow continuation, memory curation, knowledge engine
 
-### Database
-- **Tech**: SQLite via Prisma ORM
-- **Models**: Session, Memory, MemoryRelation, TimelineEvent, Project, VaultItem, AIDailySummary, SearchQuery
-
----
-
-## Files Created
-
-### Dashboard (src/app/)
-| File | Lines | Description |
-|------|-------|-------------|
-| `page.tsx` | 1,407 | Main dashboard with 9 views (Dashboard, Current Work, Projects, Timeline, Memories, Search, AI Assistant, Vault, Settings) |
-| `layout.tsx` | Updated | Dark mode, ThemeProvider, Cortex branding |
-| `globals.css` | Updated | Glassmorphism utilities, animations, custom scrollbars |
-
-### API Routes (src/app/api/)
-| File | Lines | Description |
-|------|-------|-------------|
-| `memories/route.ts` | 176 | CRUD for memories with filtering and search |
-| `sessions/route.ts` | 86 | Session management with auto-end logic |
-| `timeline/route.ts` | 138 | Timeline event tracking |
-| `projects/route.ts` | 105 | Project CRUD |
-| `search/route.ts` | 378 | Semantic text search with relevance scoring |
-| `ai/recall/route.ts` | 141 | AI-powered context recall via z-ai-web-dev-sdk |
-| `ai/summarize/route.ts` | 354 | AI summaries for sessions, days, projects |
-| `vault/route.ts` | 136 | Encrypted vault item management |
-| `vault/[id]/route.ts` | 132 | Vault item decrypt/retrieve/delete |
-| `security/detect/route.ts` | 217 | Sensitive data pattern detection |
-| `context-capsule/route.ts` | 169 | AI context capsule generation |
-
-### Security (src/lib/security/)
-| File | Lines | Description |
-|------|-------|-------------|
-| `detector.ts` | 559 | 16+ sensitive data pattern detectors, entropy analysis, content sanitizer |
-| `vault.ts` | 150 | AES-256-GCM encryption/decryption |
-| `index.ts` | 3 | Barrel exports |
-
-### AI (src/lib/ai/)
-| File | Lines | Description |
-|------|-------|-------------|
-| `context-builder.ts` | 258 | Context capsule builder with sanitization |
-
-### Browser Extension (extension/)
-| File | Lines | Description |
-|------|-------|-------------|
-| `manifest.json` | - | Chrome MV3 manifest with permissions |
-| `background/index.js` | 1,373 | Service worker: tab tracking, session management, memory pipeline, search, privacy |
-| `content/index.js` | 702 | Content scripts: page extraction, floating button, SPA navigation, text selection |
-| `popup/index.html` | 575 | Compact popup with stats, search, controls |
-| `popup/app.js` | - | Popup logic |
-| `sidebar/index.html` | 1,043 | Full side panel with dashboard, timeline, memories, notes, settings |
-| `sidebar/app.js` | - | Sidebar logic |
-| `icons/` | - | Generated app icons (16, 48, 128, 1024px) |
-
-### Core (src/)
-| File | Lines | Description |
-|------|-------|-------------|
-| `types/index.ts` | - | TypeScript interfaces for all models + UI types |
-| `lib/memory-store.ts` | 450 | Zustand store with 9 state slices |
-| `lib/db.ts` | - | Prisma client |
-| `prisma/schema.prisma` | - | 8 database models |
+### Database (22 Prisma models)
+- Auth: User, Account, SessionToken
+- Core: Session, Memory, MemoryRelation, TimelineEvent, Project
+- Security: VaultItem
+- AI: AIDailySummary, SearchQuery, AgentExecution
+- Knowledge: KnowledgeNode, KnowledgeEdge
+- Cognition: HybridMemory, WorkflowState
+- Enterprise: Organization, OrgMember, Workspace, AuditLog
+- Platform: ProductivityInsight, MemoryImport, SyncState
 
 ---
 
-## Total: ~8,500+ lines of production-quality code
+## System Statistics
 
-## Key Features Implemented
+| Metric | Value |
+|---|---|
+| Total Files | 115 |
+| Total Lines of Code | 21,955 |
+| API Routes | 30+ |
+| Prisma Models | 22 |
+| Agent Types | 8 |
+| UI Views | 13 |
+| Import Connectors | 9 |
 
-1. **Live Context Reading** — Tab tracking, URL monitoring, content extraction, page type detection
-2. **Intelligent Session Understanding** — Auto-grouping tabs into work sessions, intent inference
-3. **Automatic Workspace Grouping** — Domain-based workspace context with activity scoring
-4. **Timeline Memory** — Complete chronological event log with session association
-5. **Semantic Memory Engine** — Text-based search with relevance scoring, tag filtering
-6. **AI Recall System** — z-ai-web-dev-sdk powered context reconstruction and Q&A
-7. **Smart Summaries** — AI-generated daily, session, and project summaries
-8. **Smart Tab Intelligence** — Duplicate detection, workspace creation, tab grouping
-9. **Context Graph** — Visual SVG network graph with animated connections
-10. **Selective Encryption Vault** — AES-256-GCM, 16+ sensitive pattern detectors, entropy analysis
-11. **Privacy Protection** — Incognito ignore, sensitive URL blocking, content sanitization
-12. **AI Context Capsules** — Sanitized, structured context for AI systems
-13. **Browser Extension** — Full Chrome MV3 with background worker, content scripts, popup, sidebar
-14. **Beautiful Dashboard** — Glassmorphism, Framer Motion animations, 9 views, responsive
+---
+
+## Files Created/Modified
+
+### Database & Types
+- `prisma/schema.prisma` — 22 models
+- `src/types/index.ts` — Complete type system
+
+### Authentication
+- `src/lib/auth.ts` — NextAuth configuration
+- `src/lib/auth-helpers.ts` — Auth utilities
+- `src/app/api/auth/[...nextauth]/route.ts` — Auth API
+- `src/components/providers.tsx` — SessionProvider wrapper
+
+### AI Core Engine
+- `src/lib/ai/agent-orchestrator.ts` — 8-agent orchestration system
+- `src/lib/ai/agent-routers.ts` — Contextual AI routing
+- `src/lib/ai/workflow-continuation.ts` — Interruption detection & resumption
+- `src/lib/ai/memory-curator.ts` — Memory deduplication, compression, archiving
+- `src/lib/ai/knowledge-engine.ts` — Graph construction, pathfinding, clustering
+- `src/lib/ai/context-builder.ts` — AI context capsule generation
+
+### Security
+- `src/lib/security/detector.ts` — 16+ sensitive pattern detectors
+- `src/lib/security/vault.ts` — AES-256-GCM encryption
+- `src/lib/security/index.ts` — Barrel exports
+
+### API Routes (30+)
+- Core: memories, sessions, timeline, projects, search
+- AI: ai/recall, ai/summarize, ai/predictive
+- Agents: agents, agents/executions, agents/[id]
+- Knowledge: knowledge-graph, knowledge-graph/search
+- Workflow: workflow/continuation
+- Enterprise: organizations, organizations/[id], organizations/[id]/members
+- Platform: sync, import, import/[id], import/connectors, memory-curation, hybrid-memory, audit-log
+- Security: security/detect, vault, vault/[id], privacy/dashboard
+- Analytics: analytics/productivity, analytics/daily-summary
+- Context: context-capsule
+
+### Dashboard UI
+- `src/app/page.tsx` — Main dashboard with 13 views
+- `src/app/layout.tsx` — Dark mode, providers, metadata
+- `src/app/globals.css` — Glassmorphism, animations, custom scrollbars
+
+### Browser Extension
+- `extension/manifest.json` — MV3 manifest
+- `extension/background/index.js` — Service worker (2018 lines)
+- `extension/content/index.js` — Content scripts (702 lines)
+- `extension/popup/index.html` + `app.js` — Popup (640 + 418 lines)
+- `extension/sidebar/index.html` + `app.js` — Side panel (1333 + 908 lines)
+- `extension/icons/` — Custom AI brain icons
+
+---
+
+## Key Capabilities Implemented
+
+### 1. Continuous Cognitive Memory Engine
+- Persistent evolving memory graph with 22 data models
+- Knowledge nodes and edges connecting all activity
+- Entity extraction, pathfinding (Dijkstra), clustering, PageRank ranking
+
+### 2. AI Workflow Continuation Engine
+- Automatic interruption detection (30min inactivity threshold)
+- Full context snapshot at interruption point
+- AI-powered resumption suggestions with completeness scoring
+- One-click workflow resume
+
+### 3. Multi-Modal Memory System
+- Screenshot capture via chrome.tabs.captureVisibleTab
+- Image processing for visual memory
+- Voice note capture placeholder
+- Unified semantic memory from all formats
+
+### 4. AI Project Intelligence
+- Architecture memory, tech stack, coding patterns, decisions
+- Active workflows, known issues, recent decisions tracking
+- Project-level context capsules
+
+### 5. AI Agent System (8 Agents)
+- Research Agent, Coding Agent, Summarization Agent
+- Timeline Agent, Memory Curator, Workflow Optimizer
+- Knowledge Connector, Debugging Assistant
+- Priority-based task queue, multi-agent chaining
+
+### 6. Contextual AI Routing System
+- 7 AI contexts: coding, summarization, reasoning, embedding, creative, analysis, conversation
+- Auto-routing based on content analysis
+- Privacy-level model selection (normal/elevated/maximum)
+
+### 7. Real-Time Knowledge Graph
+- 8 node types, 8 edge types
+- Force-directed SVG visualization
+- Animated particles along edges
+- Interactive hover tooltips
+
+### 8. AI-Ready Context Capsule Engine
+- Compressed relevant work context
+- Semantic meaning preservation
+- Secret sanitization
+- Token-limit-aware formatting
+
+### 9. Enterprise-Grade Account System
+- NextAuth.js with credentials provider
+- Organization workspaces, team management
+- Role-based permissions (owner, admin, member, viewer)
+- Audit logging
+
+### 10. Cross-Device Cognitive Sync
+- Device registration and identification
+- Incremental version-based conflict resolution
+- Periodic auto-sync (5-minute intervals)
+- Pending operations queue
+
+### 11. Memory Import System
+- 9 connectors: GitHub, Notion, Slack, Linear, Google Docs, VS Code, Discord, Jira, Figma
+- Import configuration and status tracking
+- Deduplication-aware merge with existing memories
+
+### 12. Intelligent Productivity Detection
+- Deep work tracking
+- Distraction detection
+- Context switching analysis
+- Workflow inefficiency identification
+- AI-powered optimization suggestions
+
+### 13. AI Memory Curation
+- Duplicate detection (Jaccard similarity)
+- Repetitive memory compression
+- Low-importance archival
+- Hierarchical memory organization (type → project → topic)
+- Importance scoring (0-10) based on recency, access, connections
+
+### 14. Advanced Privacy System
+- Privacy transparency dashboard
+- Memory visibility controls
+- Selective forgetting/deletion
+- AI access logging
+- Encrypted memory layers
+
+### 15. Hybrid Memory Architecture
+- 5 tiers: short-term, long-term, episodic, semantic, procedural
+- Importance decay rates
+- Access tracking and promotion/demotion
+- Archive management
+
+### 16. AI Predictive Assistance
+- Suggested documentation
+- Unfinished work detection
+- Repeated error patterns
+- Preloaded references from knowledge graph
+- Architecture improvement suggestions
+
+### 17. Security Architecture
+- 16+ sensitive pattern detectors (OpenAI, Google, AWS, GitHub, Slack, Stripe, JWT, RSA, SSH, DB strings, credit cards, OAuth, .env)
+- Shannon entropy analysis (threshold ≥ 4.5)
+- AES-256-GCM encryption vault
+- Content sanitization for AI context
+- Privacy controls (incognito ignore, sensitive URL blocking)

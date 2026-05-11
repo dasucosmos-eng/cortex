@@ -57,6 +57,21 @@
     saveSettingsBtn: document.getElementById('saveSettingsBtn'),
     clearDataBtnSettings: document.getElementById('clearDataBtnSettings'),
 
+    // Agents
+    agentTypeSelect: document.getElementById('agentTypeSelect'),
+    agentInput: document.getElementById('agentInput'),
+    executeAgentBtn: document.getElementById('executeAgentBtn'),
+    agentsCount: document.getElementById('agentsCount'),
+    agentExecutionsList: document.getElementById('agentExecutionsList'),
+    checkContinuationsBtn: document.getElementById('checkContinuationsBtn'),
+    continuationsList: document.getElementById('continuationsList'),
+    captureScreenshotBtn: document.getElementById('captureScreenshotBtn'),
+    syncNowBtn: document.getElementById('syncNowBtn'),
+
+    // Auth
+    authIndicator: document.getElementById('authIndicator'),
+    authLabel: document.getElementById('authLabel'),
+
     // Search results
     searchResultsPanel: document.getElementById('searchResultsPanel'),
     searchBackBtn: document.getElementById('searchBackBtn'),
@@ -174,6 +189,7 @@
       dashboard: 'Dashboard',
       timeline: 'Timeline',
       memories: 'Memories',
+      agents: 'Agents',
       notes: 'Quick Note',
       settings: 'Settings',
     };
@@ -184,6 +200,7 @@
       case 'dashboard': loadDashboard(); break;
       case 'timeline': loadTimeline(); break;
       case 'memories': loadMemories(0); break;
+      case 'agents': loadAgents(); break;
       case 'notes': loadNotes(); break;
       case 'settings': loadSettings(); break;
     }
@@ -629,6 +646,162 @@
     }
   }
 
+  // ===== AGENTS =====
+
+  async function loadAgents() {
+    // Load agent executions
+    const executionsResponse = await sendMessage('GET_AGENT_EXECUTIONS');
+    if (executionsResponse.success && executionsResponse.data) {
+      const executions = executionsResponse.data;
+      els.agentsCount.textContent = executions.length;
+
+      if (executions.length === 0) {
+        els.agentExecutionsList.innerHTML = `
+          <div class="empty-state" style="padding:16px 0;">
+            <p>No agent executions yet.</p>
+          </div>
+        `;
+      } else {
+        const agentIcons = {
+          research: '🔍', summarize: '📝', code: '💻',
+          organize: '📋', workflow: '🔄',
+        };
+        els.agentExecutionsList.innerHTML = executions
+          .slice(0, 10)
+          .map(exec => `
+            <div class="agent-execution-card">
+              <div class="agent-execution-header">
+                <div class="agent-execution-type">
+                  <span>${agentIcons[exec.agentType] || '🤖'}</span>
+                  ${escapeHtml(exec.agentType || 'unknown')}
+                </div>
+                <span class="agent-execution-status ${exec.status || 'completed'}">${exec.status || 'completed'}</span>
+              </div>
+              <div class="agent-execution-input" title="${escapeHtml(exec.input || '')}">${escapeHtml(exec.input || 'No input')}</div>
+              <div class="agent-execution-time">${timeAgo(exec.timestamp)}</div>
+            </div>
+          `)
+          .join('');
+      }
+    } else {
+      els.agentsCount.textContent = '0';
+    }
+
+    // Load continuations
+    loadContinuations();
+  }
+
+  async function executeAgent() {
+    const agentType = els.agentTypeSelect.value;
+    const input = els.agentInput.value.trim();
+    if (!input) {
+      showToast('Please describe what the agent should do', 'error');
+      return;
+    }
+
+    els.executeAgentBtn.disabled = true;
+    els.executeAgentBtn.textContent = 'Executing...';
+
+    try {
+      const response = await sendMessage('EXECUTE_AGENT', { agentType, input });
+      if (response.success) {
+        showToast('Agent executed successfully');
+        els.agentInput.value = '';
+        loadAgents();
+      } else {
+        showToast(response.error || 'Agent execution failed', 'error');
+      }
+    } catch (e) {
+      showToast('Agent execution failed', 'error');
+    }
+
+    els.executeAgentBtn.disabled = false;
+    els.executeAgentBtn.textContent = 'Execute Agent';
+  }
+
+  async function loadContinuations() {
+    const response = await sendMessage('GET_CONTINUATION');
+    if (!response.success) return;
+
+    const suggestions = response.data?.suggestions || [];
+    if (suggestions.length === 0) {
+      els.continuationsList.innerHTML = `
+        <div class="empty-state" style="padding:16px 0;">
+          <p>No continuation suggestions yet.</p>
+        </div>
+      `;
+      return;
+    }
+
+    els.continuationsList.innerHTML = suggestions
+      .slice(0, 5)
+      .map(sug => `
+        <div class="continuation-card" data-context="${escapeHtml(sug.context || '')}">
+          <div class="continuation-title">${escapeHtml(sug.title || 'Continue Work')}</div>
+          <div class="continuation-desc">${escapeHtml(sug.description || '')}</div>
+        </div>
+      `)
+      .join('');
+  }
+
+  async function checkContinuations() {
+    const btn = els.checkContinuationsBtn;
+    btn.classList.add('spinning');
+    try {
+      const response = await sendMessage('GET_CONTINUATION');
+      if (response.success) {
+        loadContinuations();
+        const suggestions = response.data?.suggestions || [];
+        showToast(suggestions.length > 0 ? `Found ${suggestions.length} suggestion(s)` : 'No suggestions found');
+      }
+    } catch (e) {
+      showToast('Failed to check continuations', 'error');
+    }
+    btn.classList.remove('spinning');
+  }
+
+  async function captureScreenshot() {
+    const response = await sendMessage('CAPTURE_SCREENSHOT');
+    if (response.success) {
+      showToast('Screenshot captured');
+    } else {
+      showToast(response.error || 'Failed to capture screenshot', 'error');
+    }
+  }
+
+  async function syncNow() {
+    showToast('Syncing...');
+    const response = await sendMessage('SYNC_NOW');
+    if (response.success) {
+      const data = response.data;
+      if (data.status === 'connected') {
+        showToast('Sync completed');
+      } else if (data.status === 'offline') {
+        showToast('Not authenticated — login first', 'error');
+      } else {
+        showToast('Sync failed', 'error');
+      }
+    } else {
+      showToast('Sync failed', 'error');
+    }
+  }
+
+  // ===== AUTH =====
+
+  async function loadAuthStatus() {
+    const response = await sendMessage('GET_AUTH_STATUS');
+    if (response.success) {
+      const { isAuthenticated } = response.data;
+      if (isAuthenticated) {
+        els.authIndicator.classList.add('connected');
+        els.authLabel.textContent = 'Connected';
+      } else {
+        els.authIndicator.classList.remove('connected');
+        els.authLabel.textContent = 'Offline';
+      }
+    }
+  }
+
   // ===== EVENT LISTENERS =====
 
   // Navigation
@@ -700,6 +873,17 @@
   els.saveSettingsBtn.addEventListener('click', saveSettings);
   els.clearDataBtnSettings.addEventListener('click', clearAllData);
 
+  // Agents
+  if (els.executeAgentBtn) els.executeAgentBtn.addEventListener('click', executeAgent);
+  if (els.checkContinuationsBtn) els.checkContinuationsBtn.addEventListener('click', checkContinuations);
+  if (els.captureScreenshotBtn) els.captureScreenshotBtn.addEventListener('click', captureScreenshot);
+  if (els.syncNowBtn) els.syncNowBtn.addEventListener('click', syncNow);
+
+  // Auth
+  if (els.authIndicator) els.authIndicator.addEventListener('click', () => {
+    switchPanel('settings');
+  });
+
   // Clear all (nav)
   if (els.clearAllBtn) {
     els.clearAllBtn.addEventListener('click', clearAllData);
@@ -710,10 +894,12 @@
   async function init() {
     // Load initial data
     await loadStatus();
+    await loadAuthStatus();
 
     // Set up periodic refresh (every 30 seconds)
     state.refreshInterval = setInterval(() => {
       loadStatus();
+      loadAuthStatus();
     }, 30000);
   }
 
