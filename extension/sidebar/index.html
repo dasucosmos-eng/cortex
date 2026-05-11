@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — AI Browser Memory</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #09090d;
+      --bg-secondary: #111118;
+      --bg-tertiary: #18181f;
+      --bg-card: rgba(18, 18, 26, 0.8);
+      --bg-card-hover: rgba(24, 24, 36, 0.9);
+      --bg-input: rgba(255, 255, 255, 0.03);
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+      --border-focus: rgba(16, 185, 129, 0.4);
+      --text-primary: #eaeaf0;
+      --text-secondary: #8888a0;
+      --text-muted: #4a4a5e;
+      --accent: #10b981;
+      --accent-hover: #0ea572;
+      --accent-dim: rgba(16, 185, 129, 0.1);
+      --accent-glow: rgba(16, 185, 129, 0.2);
+      --cyan: #06b6d4;
+      --amber: #fbbf24;
+      --rose: #f472b6;
+      --violet: #a78bfa;
+      --sky: #60a5fa;
+      --danger: #ef4444;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --radius-lg: 14px;
+      --sidebar-width: 56px;
+      --content-width: calc(100% - var(--sidebar-width));
+    }
+
+    body {
+      width: 100%;
+      height: 100vh;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 5px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+
+    /* ===== LAYOUT ===== */
+    .app-layout {
+      display: flex;
+      height: 100vh;
+    }
+
+    /* ===== SIDEBAR NAV ===== */
+    .nav-sidebar {
+      width: var(--sidebar-width);
+      height: 100vh;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 0;
+      flex-shrink: 0;
+    }
+    .nav-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      color: white;
+      letter-spacing: -0.5px;
+      margin-bottom: 20px;
+    }
+    .nav-items {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      width: 100%;
+      padding: 0 8px;
+    }
+    .nav-item {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all 0.15s;
+      position: relative;
+    }
+    .nav-item:hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--text-secondary);
+    }
+    .nav-item.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .nav-item svg { width: 18px; height: 18px; }
+    .nav-item .tooltip {
+      position: absolute;
+      left: 48px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+      z-index: 100;
+    }
+    .nav-item:hover .tooltip { opacity: 1; }
+    .nav-spacer { flex: 1; }
+    .nav-item.danger:hover {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--danger);
+    }
+
+    /* ===== MAIN CONTENT ===== */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top bar */
+    .top-bar {
+      padding: 14px 20px 10px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(16, 185, 129, 0.03) 0%, transparent 100%);
+    }
+    .top-bar-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .top-bar-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .top-bar-title span {
+      color: var(--text-muted);
+      font-weight: 400;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+    .top-bar-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .tracking-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .tracking-toggle .toggle {
+      width: 32px;
+      height: 18px;
+      border-radius: 9px;
+      background: rgba(255,255,255,0.08);
+      position: relative;
+      transition: background 0.2s;
+    }
+    .tracking-toggle .toggle.active {
+      background: var(--accent);
+    }
+    .tracking-toggle .toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: white;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .tracking-toggle .toggle.active::after {
+      transform: translateX(14px);
+    }
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0 12px;
+      height: 36px;
+      transition: all 0.2s;
+    }
+    .search-bar:focus-within {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    .search-bar svg { flex-shrink: 0; color: var(--text-muted); }
+    .search-bar input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      font-family: inherit;
+    }
+    .search-bar input::placeholder { color: var(--text-muted); }
+
+    /* Panels */
+    .panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: none;
+    }
+    .panel.active { display: block; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .section-count {
+      font-size: 10px;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 1px 8px;
+    }
+
+    /* ===== DASHBOARD PANEL ===== */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .stat-card:hover { border-color: var(--border-hover); }
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .stat-value.green { color: var(--accent); }
+    .stat-value.cyan { color: var(--cyan); }
+    .stat-value.amber { color: var(--amber); }
+    .stat-value.rose { color: var(--rose); }
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Session card */
+    .session-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .session-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .session-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent-glow);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .session-name {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .session-stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .session-stat {
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .session-stat svg { width: 13px; height: 13px; opacity: 0.6; }
+    .domain-chips {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .domain-chip {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    /* Workspaces */
+    .workspace-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .workspace-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: default;
+      transition: all 0.15s;
+    }
+    .workspace-item:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-card-hover);
+    }
+    .workspace-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .workspace-icon.docs { background: rgba(96, 165, 250, 0.1); }
+    .workspace-icon.code { background: rgba(16, 185, 129, 0.1); }
+    .workspace-icon.social { background: rgba(244, 114, 182, 0.1); }
+    .workspace-icon.email { background: rgba(251, 191, 36, 0.1); }
+    .workspace-icon.video { background: rgba(239, 68, 68, 0.1); }
+    .workspace-icon.ai { background: rgba(167, 139, 250, 0.1); }
+    .workspace-icon.shopping { background: rgba(251, 191, 36, 0.1); }
+    .workspace-icon.general { background: rgba(255, 255, 255, 0.05); }
+    .workspace-info { flex: 1; min-width: 0; }
+    .workspace-domain {
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .workspace-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* ===== TIMELINE PANEL ===== */
+    .timeline-container {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .timeline-group {
+      margin-bottom: 16px;
+    }
+    .timeline-group-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .timeline-group-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+    .timeline-item {
+      display: flex;
+      gap: 10px;
+      padding: 8px 0;
+      position: relative;
+      cursor: default;
+    }
+    .timeline-item:hover {
+      background: rgba(255,255,255,0.01);
+      border-radius: var(--radius-sm);
+      margin: 0 -8px;
+      padding: 8px;
+    }
+    .timeline-line {
+      width: 2px;
+      background: var(--border);
+      flex-shrink: 0;
+      margin-left: 5px;
+      position: relative;
+    }
+    .timeline-line::before {
+      content: '';
+      position: absolute;
+      top: 10px;
+      left: -3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--bg-primary);
+      border: 2px solid var(--text-muted);
+    }
+    .timeline-item.type-page .timeline-line::before { border-color: var(--sky); }
+    .timeline-item.type-navigate .timeline-line::before { border-color: var(--accent); }
+    .timeline-item.type-clip .timeline-line::before { border-color: var(--rose); }
+    .timeline-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .timeline-title {
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .timeline-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    /* ===== MEMORIES PANEL ===== */
+    .memories-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .memory-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .memory-card:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-card-hover);
+      transform: translateX(2px);
+    }
+    .memory-type-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+    }
+    .memory-type-icon.page { background: rgba(96, 165, 250, 0.1); }
+    .memory-type-icon.note { background: rgba(251, 191, 36, 0.1); }
+    .memory-type-icon.clip { background: rgba(244, 114, 182, 0.1); }
+    .memory-body { flex: 1; min-width: 0; }
+    .memory-title {
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .memory-desc {
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+    .memory-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .memory-tag {
+      padding: 1px 6px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+    }
+    .memory-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .memory-delete {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: all 0.15s;
+    }
+    .memory-card:hover .memory-delete { opacity: 1; }
+    .memory-delete:hover {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--danger);
+    }
+    .memory-delete svg { width: 13px; height: 13px; }
+
+    .load-more {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .load-more:hover {
+      border-color: var(--border-hover);
+      color: var(--text-secondary);
+      background: rgba(255,255,255,0.02);
+    }
+
+    /* ===== NOTES PANEL ===== */
+    .note-editor {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .note-editor-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .note-editor-header span {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .note-textarea {
+      width: 100%;
+      min-height: 120px;
+      max-height: 300px;
+      padding: 12px 14px;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: inherit;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+    }
+    .note-textarea::placeholder { color: var(--text-muted); }
+    .note-editor-footer {
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .note-char-count {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .save-note-btn {
+      padding: 6px 16px;
+      border-radius: var(--radius-sm);
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .save-note-btn:hover { background: var(--accent-hover); }
+    .save-note-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .saved-notes {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .saved-note-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    .saved-note-card .note-content {
+      font-size: 12.5px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 6px;
+    }
+    .saved-note-card .note-time {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* ===== SEARCH RESULTS ===== */
+    .search-results-panel {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: var(--sidebar-width);
+      right: 0;
+      bottom: 0;
+      background: var(--bg-primary);
+      z-index: 50;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+    .search-results-panel.active { display: block; }
+    .search-results-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .search-back-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .search-back-btn:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+    .search-query-display {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .search-results-count {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* ===== SKELETON ===== */
+    .skeleton {
+      background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: var(--radius-sm);
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-state {
+      text-align: center;
+      padding: 32px 20px;
+      color: var(--text-muted);
+    }
+    .empty-state svg {
+      color: var(--text-muted);
+      opacity: 0.3;
+      margin-bottom: 10px;
+    }
+    .empty-state p { font-size: 12px; }
+
+    /* ===== TOAST ===== */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      font-size: 12px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+      animation: toast-in 0.3s ease, toast-out 0.3s ease 2.5s forwards;
+      max-width: 300px;
+    }
+    .toast.success { border-color: rgba(16, 185, 129, 0.3); }
+    .toast.error { border-color: rgba(239, 68, 68, 0.3); }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(12px) scale(0.95); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toast-out {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(8px); }
+    }
+
+    /* ===== SETTINGS MODAL ===== */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      width: 90%;
+      max-width: 400px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    .modal-close {
+      float: right;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+      padding: 4px;
+    }
+    .modal-close:hover { color: var(--text-primary); }
+    .setting-group {
+      margin-bottom: 16px;
+    }
+    .setting-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .setting-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .setting-input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-input);
+      color: var(--text-primary);
+      font-size: 12px;
+      outline: none;
+      font-family: inherit;
+    }
+    .setting-input:focus {
+      border-color: var(--border-focus);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-layout">
+    <!-- Nav sidebar -->
+    <nav class="nav-sidebar" role="navigation" aria-label="Main navigation">
+      <div class="nav-logo">C</div>
+      <div class="nav-items">
+        <div class="nav-item active" data-panel="dashboard" role="button" tabindex="0" aria-label="Dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span class="tooltip">Dashboard</span>
+        </div>
+        <div class="nav-item" data-panel="timeline" role="button" tabindex="0" aria-label="Timeline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span class="tooltip">Timeline</span>
+        </div>
+        <div class="nav-item" data-panel="memories" role="button" tabindex="0" aria-label="Memories">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="tooltip">Memories</span>
+        </div>
+        <div class="nav-item" data-panel="notes" role="button" tabindex="0" aria-label="Notes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span class="tooltip">Quick Note</span>
+        </div>
+        <div class="nav-spacer"></div>
+        <div class="nav-item" data-panel="settings" role="button" tabindex="0" aria-label="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="tooltip">Settings</span>
+        </div>
+        <div class="nav-item danger" id="clearAllBtn" role="button" tabindex="0" aria-label="Clear all data">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span class="tooltip">Clear All Data</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main-content">
+      <!-- Top bar -->
+      <div class="top-bar">
+        <div class="top-bar-row">
+          <div class="top-bar-title" id="panelTitle">Dashboard <span id="panelSubtitle"></span></div>
+          <div class="top-bar-actions">
+            <div class="tracking-toggle" id="trackingToggle">
+              <div class="toggle active" id="trackingSwitch"></div>
+              <span id="trackingText">Tracking</span>
+            </div>
+          </div>
+        </div>
+        <div class="search-bar">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="searchInput" placeholder="Search memories, pages, notes..." autocomplete="off" />
+        </div>
+      </div>
+
+      <!-- Dashboard Panel -->
+      <div class="panel active" id="panel-dashboard">
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-card"><div class="skeleton" style="height:28px;width:60px;"></div><div class="skeleton" style="height:14px;width:80px;margin-top:4px;"></div></div>
+          <div class="stat-card"><div class="skeleton" style="height:28px;width:60px;"></div><div class="skeleton" style="height:14px;width:80px;margin-top:4px;"></div></div>
+          <div class="stat-card"><div class="skeleton" style="height:28px;width:60px;"></div><div class="skeleton" style="height:14px;width:80px;margin-top:4px;"></div></div>
+          <div class="stat-card"><div class="skeleton" style="height:28px;width:60px;"></div><div class="skeleton" style="height:14px;width:80px;margin-top:4px;"></div></div>
+        </div>
+
+        <div class="section-header">
+          <div class="section-title">Active Session</div>
+        </div>
+        <div id="sessionCard">
+          <div class="skeleton" style="height:80px;"></div>
+        </div>
+
+        <div class="section-header">
+          <div class="section-title">Workspaces</div>
+          <div class="section-count" id="workspaceCount">—</div>
+        </div>
+        <div id="workspacesList">
+          <div class="skeleton" style="height:44px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:44px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:44px;"></div>
+        </div>
+      </div>
+
+      <!-- Timeline Panel -->
+      <div class="panel" id="panel-timeline">
+        <div class="section-header">
+          <div class="section-title">Today's Activity</div>
+          <div class="section-count" id="timelineCount">—</div>
+        </div>
+        <div class="timeline-container" id="timelineContainer">
+          <div class="skeleton" style="height:48px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:48px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:48px;"></div>
+        </div>
+      </div>
+
+      <!-- Memories Panel -->
+      <div class="panel" id="panel-memories">
+        <div class="section-header">
+          <div class="section-title">All Memories</div>
+          <div class="section-count" id="memoriesCount">—</div>
+        </div>
+        <div class="memories-list" id="memoriesList">
+          <div class="skeleton" style="height:64px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:64px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:64px;"></div>
+        </div>
+        <button class="load-more" id="loadMoreMemories" style="display:none;">Load more memories</button>
+      </div>
+
+      <!-- Notes Panel -->
+      <div class="panel" id="panel-notes">
+        <div class="section-header">
+          <div class="section-title">Quick Note</div>
+        </div>
+        <div class="note-editor">
+          <div class="note-editor-header">
+            <span>📝 New Note</span>
+          </div>
+          <textarea class="note-textarea" id="noteTextarea" placeholder="Write a quick note... Cortex will remember it for you." maxlength="5000"></textarea>
+          <div class="note-editor-footer">
+            <span class="note-char-count"><span id="noteCharCount">0</span> / 5000</span>
+            <button class="save-note-btn" id="saveNoteBtn" disabled>Save Note</button>
+          </div>
+        </div>
+
+        <div class="section-header">
+          <div class="section-title">Saved Notes</div>
+          <div class="section-count" id="notesCount">—</div>
+        </div>
+        <div class="saved-notes" id="savedNotesList">
+          <div class="empty-state">
+            <p>No notes yet. Write your first note above!</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div class="panel" id="panel-settings">
+        <div class="section-header">
+          <div class="section-title">Settings</div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Ignored Domains</div>
+          <div class="setting-desc">One domain per line. These sites won't be tracked.</div>
+          <textarea class="setting-input" id="ignoredDomainsInput" rows="5" placeholder="example.com&#10;another-site.org" style="resize:vertical;"></textarea>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Privacy Mode</div>
+          <div class="setting-desc">All data is stored locally in your browser.</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <span style="font-size:12px;color:var(--accent);">🔒 Local Storage</span>
+            <span style="font-size:11px;color:var(--text-muted);">— Data never leaves your browser</span>
+          </div>
+        </div>
+        <div class="setting-group">
+          <button class="save-note-btn" id="saveSettingsBtn" style="margin-top:8px;">Save Settings</button>
+        </div>
+        <div class="setting-group" style="margin-top:24px;">
+          <div class="setting-label" style="color:var(--danger);">Danger Zone</div>
+          <div class="setting-desc">Permanently delete all stored data.</div>
+          <button class="save-note-btn" id="clearDataBtnSettings" style="background:var(--danger);margin-top:4px;">Clear All Data</button>
+        </div>
+      </div>
+
+      <!-- Search Results overlay -->
+      <div class="search-results-panel" id="searchResultsPanel">
+        <div class="search-results-header">
+          <button class="search-back-btn" id="searchBackBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          </button>
+          <span>Results for "<span id="searchQueryDisplay"></span>"</span>
+        </div>
+        <div class="search-results-count" id="searchResultsCount"></div>
+        <div class="memories-list" id="searchResultsList"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

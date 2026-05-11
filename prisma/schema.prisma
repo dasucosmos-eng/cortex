@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  title       String
+  project     String?
+  task        String?
+  summary     String?
+  intent      String?
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  isActive    Boolean  @default(true)
+  tabCount    Int      @default(1)
+  memories    Memory[]
+  timeline    TimelineEvent[]
+}
+
+model Memory {
+  id          String   @id @default(cuid())
+  sessionId   String?
+  session     Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  type        String   @default("general") // general, code, research, decision, reference, snippet
+  content     String
+  summary     String?
+  metadata    String?  // JSON string for flexible data
+  url         String?
+  domain      String?
+  title       String?
+  projectId   String?
+  tags        String?  // JSON array string
+  embedding   String?  // Base64 encoded embedding vector
+  isSensitive Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  relatedFrom MemoryRelation[] @relation("MemoryRelationFrom")
+  relatedTo   MemoryRelation[] @relation("MemoryRelationTo")
+}
+
+model MemoryRelation {
+  id          String @id @default(cuid())
+  fromId      String
+  toId        String
+  from        Memory @relation("MemoryRelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to          Memory @relation("MemoryRelationTo", fields: [toId], references: [id], onDelete: Cascade)
+  type        String @default("related") // related, depends, extends, contrasts, references
+  strength    Float  @default(1.0)
+  createdAt   DateTime @default(now())
+  @@unique([fromId, toId])
+}
+
+model TimelineEvent {
+  id        String   @id @default(cuid())
+  sessionId String?
+  session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  type      String   // tab_opened, tab_closed, search, navigation, coding, decision, note_created
+  title     String
+  url       String?
+  domain    String?
+  metadata  String?  // JSON
+  createdAt DateTime @default(now())
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  color       String   @default("#6366f1")
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model VaultItem {
+  id            String   @id @default(cuid())
+  type          String   // api_key, token, credential, certificate, ssh_key
+  label         String
+  encryptedData String   // AES-256-GCM encrypted blob
+  domain        String?  // Which website this belongs to
+  iv            String   // Initialization vector
+  authTag       String   // Auth tag
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model AIDailySummary {
+  id        String   @id @default(cuid())
+  date      String   @unique // YYYY-MM-DD
+  summary   String
+  topics    String?  // JSON array
+  projects  String?  // JSON array
+  stats     String?  // JSON object
+  createdAt DateTime @default(now())
+}
+
+model SearchQuery {
+  id        String   @id @default(cuid())
+  query     String
+  results   String?  // JSON array of memory IDs
+  filters   String?  // JSON object
+  createdAt DateTime @default(now())
+}
