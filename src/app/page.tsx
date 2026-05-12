@@ -1485,6 +1485,8 @@ export default function DashboardPage() {
     </motion.div>
   )
 
+  const CHROME_WEBSTORE_URL = process.env.NEXT_PUBLIC_CHROME_WEBSTORE_URL || 'https://chromewebstore.google.com/detail/cortex-ai-browser-memory/pending'
+
   const renderExtensionView = () => (
     <motion.div variants={pageVariants} initial="initial" animate="animate" className="space-y-6">
       {/* Header */}
@@ -1493,36 +1495,32 @@ export default function DashboardPage() {
         <p className="text-sm text-zinc-500 mt-0.5">Install the Cortex Chrome extension to unlock full browser memory tracking</p>
       </div>
 
-      {/* Download Card */}
+      {/* One-Click Install Card */}
       <Card className="glass border-zinc-800/30 overflow-hidden">
         <div className="relative">
           <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 via-transparent to-cyan-500/5" />
           <CardContent className="relative p-6">
-            <div className="flex flex-col md:flex-row items-start md:items-center gap-5">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/25">
-                <Puzzle size={32} className="text-white" />
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shrink-0 shadow-xl shadow-violet-500/25">
+                <Puzzle size={40} className="text-white" />
               </div>
-              <div className="flex-1">
-                <h3 className="text-base font-semibold text-zinc-100 mb-1">Cortex Extension for Chrome</h3>
-                <p className="text-xs text-zinc-400 leading-relaxed mb-3">
-                  The extension runs in your browser, tracking your tabs, sessions, and content automatically. 
-                  It captures memories, detects sensitive data, builds your knowledge graph, and syncs everything 
-                  to this dashboard. Without it, you can still use the dashboard manually — but the extension 
-                  makes Cortex truly powerful.
+              <div className="flex-1 text-center md:text-left">
+                <h3 className="text-xl font-bold text-zinc-100 mb-2">Cortex — AI Browser Memory</h3>
+                <p className="text-sm text-zinc-400 leading-relaxed mb-3">
+                  Track your browsing, capture memories automatically, build a knowledge graph, and sync everything 
+                  to this dashboard. One click install — no developer mode needed.
                 </p>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {['Tab Tracking', 'Auto Memory Capture', 'Sensitive Data Detection', 'Session Management', 'Knowledge Graph', 'Cloud Sync'].map((feature) => (
+                <div className="flex flex-wrap gap-2 mb-5 justify-center md:justify-start">
+                  {['Tab Tracking', 'Auto Memory Capture', 'Sensitive Data Detection', 'Knowledge Graph', 'Cloud Sync'].map((feature) => (
                     <Badge key={feature} variant="outline" className="text-[10px] text-violet-400 border-violet-500/20 bg-violet-500/5">
                       {feature}
                     </Badge>
                   ))}
                 </div>
-                <a
-                  href="/download/cortex-extension.zip"
-                  download="cortex-extension.zip"
-                >
-                  <Button className="bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer">
-                    <Download size={14} className="mr-2" /> Download Extension (.zip)
+                <a href={CHROME_WEBSTORE_URL} target="_blank" rel="noopener noreferrer">
+                  <Button className="bg-[#4285f4] hover:bg-[#3367d6] text-white font-semibold rounded-lg px-6 py-2.5 shadow-lg shadow-blue-500/20 transition-all duration-200 cursor-pointer text-sm gap-2">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 mr-1" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/></svg>
+                    Add to Chrome — It&apos;s Free
                   </Button>
                 </a>
               </div>
@@ -1531,54 +1529,41 @@ export default function DashboardPage() {
         </div>
       </Card>
 
-      {/* Installation Steps */}
+      {/* 3 Simple Steps */}
       <Card className="glass border-zinc-800/30">
         <CardContent className="p-6 space-y-5">
           <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">
-            <Chrome size={14} className="text-cyan-400" /> Installation Steps
+            <Chrome size={14} className="text-cyan-400" /> Get Started in 3 Steps
           </h3>
           <Separator className="bg-zinc-800/50" />
-          <div className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {[
               {
                 step: 1,
-                title: 'Download the Extension',
-                description: 'Click the download button above to get the extension zip file. It contains all the extension files needed for Chrome.',
+                emoji: '🪄',
+                title: 'Click "Add to Chrome"',
+                description: 'Hit the blue button above. Chrome will ask for confirmation — click "Add Extension" to approve.',
               },
               {
                 step: 2,
-                title: 'Extract the ZIP File',
-                description: 'Extract the downloaded zip to a folder on your computer. Remember where you put it — you\'ll need the folder path in the next step.',
+                emoji: '📌',
+                title: 'Pin the Extension',
+                description: 'Click the puzzle piece icon in Chrome\'s toolbar, then click the pin next to "Cortex" to keep it visible.',
               },
               {
                 step: 3,
-                title: 'Open Chrome Extensions',
-                description: 'Open Chrome and go to chrome://extensions in your address bar. Alternatively, click the three-dot menu in Chrome, go to "Extensions" and then "Manage Extensions".',
-              },
-              {
-                step: 4,
-                title: 'Enable Developer Mode',
-                description: 'In the top-right corner of the extensions page, toggle on "Developer mode". This reveals additional options for loading unpacked extensions.',
-              },
-              {
-                step: 5,
-                title: 'Load the Extension',
-                description: 'Click the "Load unpacked" button that appears. Select the extracted extension folder. The Cortex icon should appear in your browser toolbar!',
-              },
-              {
-                step: 6,
-                title: 'Connect to Your Account',
-                description: 'Click the Cortex extension icon, then click the settings gear. Enter your server URL and the same email/password you used to sign up on this website. The extension will sync all your browser data to your account.',
+                emoji: '🔗',
+                title: 'Connect Your Account',
+                description: 'Click the Cortex icon, enter the same email and password you used here. Your data will sync automatically.',
               },
             ].map((item) => (
-              <div key={item.step} className="flex gap-4">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-cyan-500/20 border border-violet-500/20 flex items-center justify-center shrink-0 mt-0.5">
+              <div key={item.step} className="text-center space-y-3">
+                <div className="text-3xl">{item.emoji}</div>
+                <div className="w-8 h-8 mx-auto rounded-full bg-gradient-to-br from-violet-500/20 to-cyan-500/20 border border-violet-500/20 flex items-center justify-center">
                   <span className="text-xs font-bold text-violet-400">{item.step}</span>
                 </div>
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-zinc-200 mb-1">{item.title}</p>
-                  <p className="text-[11px] text-zinc-500 leading-relaxed">{item.description}</p>
-                </div>
+                <p className="text-xs font-medium text-zinc-200">{item.title}</p>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">{item.description}</p>
               </div>
             ))}
           </div>
@@ -1589,7 +1574,7 @@ export default function DashboardPage() {
       <Card className="glass border-zinc-800/30">
         <CardContent className="p-6 space-y-5">
           <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">
-            <Activity size={14} className="text-emerald-400" /> How It Works After Installation
+            <Activity size={14} className="text-emerald-400" /> What the Extension Does
           </h3>
           <Separator className="bg-zinc-800/50" />
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1597,20 +1582,20 @@ export default function DashboardPage() {
               {
                 icon: <Eye size={18} />,
                 color: 'text-violet-400 bg-violet-500/15 border-violet-500/20',
-                title: 'Tracks Browsing',
-                description: 'Monitors your tabs and navigation in the background. Detects page types (docs, code, social, AI tools) automatically.',
+                title: 'Tracks Your Browsing',
+                description: 'Monitors your tabs and navigation in the background. Automatically detects page types — docs, code, social media, AI tools, and more.',
               },
               {
                 icon: <Brain size={18} />,
                 color: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/20',
                 title: 'Builds Memories',
-                description: 'Extracts content from pages you visit, creates searchable memories with tags, importance scores, and summaries.',
+                description: 'Extracts content from pages you visit, creates searchable memories with tags, importance scores, and AI-powered summaries.',
               },
               {
                 icon: <Layers size={18} />,
                 color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/20',
                 title: 'Syncs to Dashboard',
-                description: 'Pushes everything to your account on this website. Your memories, timeline, sessions, and knowledge graph are all visible here.',
+                description: 'Pushes everything to your account on this website. Your memories, timeline, sessions, and knowledge graph — all visible right here.',
               },
             ].map((card) => (
               <div key={card.title} className="glass rounded-xl p-4 border border-zinc-800/30">
@@ -1636,19 +1621,19 @@ export default function DashboardPage() {
             {[
               {
                 q: 'The extension icon doesn\'t appear in my toolbar',
-                a: 'Click the puzzle piece icon in Chrome\'s toolbar, then find "Cortex" and click the pin icon next to it to keep it visible.',
+                a: 'Click the puzzle piece icon (jigsaw) in Chrome\'s toolbar, find "Cortex" in the dropdown, and click the pin icon next to it to keep it visible.',
               },
               {
                 q: 'It says "Offline" in the extension popup',
-                a: 'Go to the extension settings and make sure the server URL is correct. It should be the same URL as this website. Then enter your login credentials.',
+                a: 'Go to the extension settings and make sure the server URL is correct. It should be the same URL as this website. Then enter your login credentials and click Connect.',
               },
               {
                 q: 'My browsing data isn\'t showing up on the dashboard',
-                a: 'Make sure tracking is enabled in the extension (the toggle should be blue). Then click "Sync Now" to push your data to the server.',
+                a: 'Make sure tracking is enabled in the extension (the toggle should be blue). Then click "Sync Now" to push your data to the server. It may take a few seconds.',
               },
               {
                 q: 'I see "Not authenticated" when trying to sync',
-                a: 'Re-enter your email and password in the extension\'s settings. The token may have expired — signing in again will fix it.',
+                a: 'Re-enter your email and password in the extension\'s settings. The token may have expired — signing in again will generate a fresh one.',
               },
             ].map((item) => (
               <div key={item.q}>
