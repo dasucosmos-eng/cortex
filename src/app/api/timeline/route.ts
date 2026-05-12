@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/timeline — List timeline events with filters and pagination
 export async function GET(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(
@@ -15,7 +21,7 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get("startDate") || undefined;
     const endDate = searchParams.get("endDate") || undefined;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { userId: session.user.id };
 
     if (sessionId) {
       where.sessionId = sessionId;
@@ -69,6 +75,11 @@ export async function GET(request: NextRequest) {
 // POST /api/timeline — Create a timeline event
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { type, title, url, domain, sessionId, metadata } = body;
 
@@ -119,6 +130,7 @@ export async function POST(request: NextRequest) {
         domain: domain || null,
         sessionId: sessionId || null,
         metadata: serializedMetadata || null,
+        userId: session.user.id,
       },
       include: {
         session: {

@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/projects — List all projects with session/memory counts
 export async function GET() {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const projects = await db.project.findMany({
+      where: { userId: session.user.id },
       orderBy: { createdAt: "desc" },
     });
 
     const sessions = await db.session.findMany({
+      where: { userId: session.user.id },
       select: { id: true, project: true },
     });
 
     const memories = await db.memory.findMany({
+      where: { userId: session.user.id },
       select: { id: true, projectId: true },
     });
 
@@ -20,9 +29,9 @@ export async function GET() {
     const sessionCounts: Record<string, number> = {};
     const memoryCounts: Record<string, number> = {};
 
-    for (const session of sessions) {
-      if (session.project) {
-        sessionCounts[session.project] = (sessionCounts[session.project] || 0) + 1;
+    for (const sessionItem of sessions) {
+      if (sessionItem.project) {
+        sessionCounts[sessionItem.project] = (sessionCounts[sessionItem.project] || 0) + 1;
       }
     }
 
@@ -61,6 +70,11 @@ export async function GET() {
 // POST /api/projects — Create a new project
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { name, description, color, icon } = body;
 
@@ -88,6 +102,7 @@ export async function POST(request: NextRequest) {
         description: description || null,
         color: color || "#6366f1",
         icon: icon || null,
+        userId: session.user.id,
       },
     });
 

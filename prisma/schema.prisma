@@ -156,6 +156,7 @@ model TimelineEvent {
   id        String   @id @default(cuid())
   sessionId String?
   session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId    String?
   type      String   // tab_opened, tab_closed, search, navigation, coding, decision, note_created
   title     String
   url       String?

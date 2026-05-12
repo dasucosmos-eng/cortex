@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/organizations/[id] — Get organization details with members
 export async function GET(
@@ -7,62 +8,46 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
+
+    // Verify membership
+    const membership = await db.orgMember.findFirst({
+      where: { organizationId: id, userId: session.user.id },
+    });
+
+    if (!membership) {
+      return NextResponse.json({ error: "Not a member of this organization" }, { status: 403 });
+    }
 
     const organization = await db.organization.findUnique({
       where: { id },
       include: {
-        members: {
-          select: {
-            id: true,
-            userId: true,
-            role: true,
-            permissions: true,
-            joinedAt: true,
-          },
-          orderBy: { joinedAt: "asc" },
-        },
-        workspaces: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            isDefault: true,
-          },
-        },
+        members: { select: { id: true, userId: true, role: true, permissions: true, joinedAt: true }, orderBy: { joinedAt: "asc" } },
+        workspaces: { select: { id: true, name: true, description: true, isDefault: true } },
       },
     });
 
     if (!organization) {
-      return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
     const enrichedMembers = organization.members.map((m) => {
       let parsedPermissions: string[] = [];
-      try {
-        parsedPermissions = m.permissions ? JSON.parse(m.permissions) : [];
-      } catch {
-        parsedPermissions = [];
-      }
+      try { parsedPermissions = m.permissions ? JSON.parse(m.permissions) : []; } catch { parsedPermissions = []; }
       return { ...m, permissions: parsedPermissions };
     });
 
     return NextResponse.json({
-      data: {
-        ...organization,
-        members: enrichedMembers,
-        memberCount: enrichedMembers.length,
-      },
+      data: { ...organization, members: enrichedMembers, memberCount: enrichedMembers.length },
     });
   } catch (error) {
     console.error("[GET /api/organizations/[id]] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch organization" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch organization" }, { status: 500 });
   }
 }
 
@@ -72,31 +57,32 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
     const body = await request.json();
     const { name, slug, description, icon } = body;
 
-    const existing = await db.organization.findUnique({
-      where: { id },
+    const membership = await db.orgMember.findFirst({
+      where: { organizationId: id, userId: session.user.id },
     });
 
-    if (!existing) {
-      return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
-      );
+    if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    // If slug is being updated, check for uniqueness
+    const existing = await db.organization.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+    }
+
     if (slug && slug !== existing.slug) {
-      const slugConflict = await db.organization.findUnique({
-        where: { slug },
-      });
+      const slugConflict = await db.organization.findUnique({ where: { slug } });
       if (slugConflict) {
-        return NextResponse.json(
-          { error: "An organization with this slug already exists" },
-          { status: 409 }
-        );
+        return NextResponse.json({ error: "An organization with this slug already exists" }, { status: 409 });
       }
     }
 
@@ -113,10 +99,7 @@ export async function PUT(
     return NextResponse.json({ data: updated });
   } catch (error) {
     console.error("[PUT /api/organizations/[id]] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to update organization" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update organization" }, { status: 500 });
   }
 }
 
@@ -126,52 +109,35 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("userId");
 
     const organization = await db.organization.findUnique({
       where: { id },
-      include: {
-        members: {
-          select: { id: true, userId: true, role: true },
-        },
-      },
+      include: { members: { select: { id: true, userId: true, role: true } } },
     });
 
     if (!organization) {
-      return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
-    // Check if user is owner
-    if (userId) {
-      const isOwner = organization.members.some(
-        (m) => m.userId === userId && m.role === "owner"
-      );
-      if (!isOwner) {
-        return NextResponse.json(
-          { error: "Only the organization owner can delete it" },
-          { status: 403 }
-        );
-      }
+    const isOwner = organization.members.some(
+      (m) => m.userId === session.user.id && m.role === "owner"
+    );
+
+    if (!isOwner) {
+      return NextResponse.json({ error: "Only the organization owner can delete it" }, { status: 403 });
     }
 
-    await db.organization.delete({
-      where: { id },
-    });
+    await db.organization.delete({ where: { id } });
 
-    return NextResponse.json({
-      data: { id, deleted: true },
-      message: "Organization deleted successfully",
-    });
+    return NextResponse.json({ data: { id, deleted: true }, message: "Organization deleted successfully" });
   } catch (error) {
     console.error("[DELETE /api/organizations/[id]] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to delete organization" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to delete organization" }, { status: 500 });
   }
 }

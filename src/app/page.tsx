@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSession, signOut } from 'next-auth/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Brain,
@@ -45,6 +46,7 @@ import {
   Copy,
   Download,
   RotateCcw,
+  LogOut,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -460,6 +462,7 @@ function GraphCanvas({ nodes, edges, height = 300 }: { nodes: GraphNode[]; edges
 
 export default function DashboardPage() {
   const [activeView, setActiveView] = useState<ViewId>('dashboard')
+  const { data: session } = useSession()
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
   // Dashboard data
@@ -664,6 +667,14 @@ export default function DashboardPage() {
 
   const renderDashboardView = () => (
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="space-y-6">
+      {/* Welcome Message */}
+      <motion.div variants={staggerItem}>
+        <h1 className="text-xl font-semibold text-zinc-100">
+          Welcome back{session?.user?.name ? `, ${session.user.name.split(' ')[0]}` : ''}
+        </h1>
+        <p className="text-sm text-zinc-500 mt-0.5">Here&apos;s your cognitive workspace overview</p>
+      </motion.div>
+
       {/* Context Capsule */}
       <motion.div variants={staggerItem}>
         <div className="glow-border rounded-xl p-5">
@@ -1617,6 +1628,41 @@ export default function DashboardPage() {
             ))}
           </nav>
         </ScrollArea>
+
+        {/* User section */}
+        {session?.user && sidebarOpen && (
+          <div className="px-3 pb-2">
+            <div className="glass rounded-lg p-2.5 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-[10px] font-bold text-white">
+                  {(session.user.name || session.user.email || 'U')[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-medium text-zinc-300 truncate">{session.user.name || 'User'}</p>
+                  <p className="text-[9px] text-zinc-600 truncate">{session.user.email}</p>
+                </div>
+              </div>
+              <button
+n                onClick={() => signOut({ callbackUrl: '/login' })}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-800/30 transition-colors text-zinc-500 hover:text-red-400 text-[10px]"
+              >
+                <LogOut size={12} />
+                Sign Out
+              </button>
+            </div>
+          </div>
+        )}
+        {!session?.user && sidebarOpen && (
+          <div className="px-3 pb-2">
+            <button
+              onClick={() => window.location.href = '/login'}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-zinc-800/30 transition-colors text-zinc-500 hover:text-zinc-300 text-xs"
+            >
+              <LogOut size={12} />
+              Sign In
+            </button>
+          </div>
+        )}
 
         {/* Collapse toggle */}
         <div className="p-2">

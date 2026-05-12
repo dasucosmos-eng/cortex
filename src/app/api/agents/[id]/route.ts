@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrchestrator } from "@/lib/ai/agent-orchestrator";
+import { auth } from "@/lib/auth";
 
 // GET /api/agents/[id] — Get specific execution details
 export async function GET(
@@ -7,15 +8,17 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
     const orchestrator = getOrchestrator();
     const execution = orchestrator.getExecution(id);
 
     if (!execution) {
-      return NextResponse.json(
-        { error: "Execution not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Execution not found" }, { status: 404 });
     }
 
     return NextResponse.json({
@@ -31,10 +34,7 @@ export async function GET(
     });
   } catch (error) {
     console.error("[GET /api/agents/:id] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to get execution" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to get execution" }, { status: 500 });
   }
 }
 
@@ -44,6 +44,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
     const orchestrator = getOrchestrator();
     const cancelled = orchestrator.cancelExecution(id);
@@ -55,14 +60,9 @@ export async function DELETE(
       );
     }
 
-    return NextResponse.json({
-      data: { taskId: id, status: "cancelled" },
-    });
+    return NextResponse.json({ data: { taskId: id, status: "cancelled" } });
   } catch (error) {
     console.error("[DELETE /api/agents/:id] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to cancel execution" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to cancel execution" }, { status: 500 });
   }
 }

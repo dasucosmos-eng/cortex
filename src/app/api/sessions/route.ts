@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/sessions — List sessions with optional project filter and memory count
 export async function GET(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const project = searchParams.get("project") || undefined;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { userId: session.user.id };
     if (project) {
       where.project = project;
     }
@@ -45,6 +51,11 @@ export async function GET(request: NextRequest) {
 // POST /api/sessions — Create a new session (ends currently active ones)
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { title, project, task, intent } = body;
 
@@ -55,16 +66,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // End any currently active sessions
+    // End any currently active sessions for this user
     await db.session.updateMany({
-      where: { isActive: true },
+      where: { isActive: true, userId: session.user.id },
       data: {
         isActive: false,
         endedAt: new Date(),
       },
     });
 
-    const session = await db.session.create({
+    const newSession = await db.session.create({
       data: {
         title: title.trim(),
         project: project || null,
@@ -72,10 +83,11 @@ export async function POST(request: NextRequest) {
         intent: intent || null,
         isActive: true,
         startedAt: new Date(),
+        userId: session.user.id,
       },
     });
 
-    return NextResponse.json({ data: session }, { status: 201 });
+    return NextResponse.json({ data: newSession }, { status: 201 });
   } catch (error) {
     console.error("[POST /api/sessions] Error:", error);
     return NextResponse.json(

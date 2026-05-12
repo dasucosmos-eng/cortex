@@ -5,11 +5,16 @@ import {
   createWorkflowSnapshot,
   detectInterruption,
 } from "@/lib/ai/workflow-continuation";
+import { auth } from "@/lib/auth";
 
 // GET /api/workflow/continuation — Get continuation suggestions
 export async function GET() {
   try {
-    // Check for interrupted workflows
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const interrupted = await detectInterruption();
 
     if (interrupted.length === 0) {
@@ -22,19 +27,18 @@ export async function GET() {
       });
     }
 
-    // Create snapshots and generate continuation suggestions
     const suggestions = [];
-    for (const session of interrupted.slice(0, 5)) {
-      const snapshot = await createWorkflowSnapshot(session.sessionId);
+    for (const sessionItem of interrupted.slice(0, 5)) {
+      const snapshot = await createWorkflowSnapshot(sessionItem.sessionId);
       if (snapshot) {
         suggestions.push({
-          sessionId: session.sessionId,
+          sessionId: sessionItem.sessionId,
           type: snapshot.type,
           title: snapshot.title,
           tabsCount: snapshot.tabs.length,
           memoriesCount: snapshot.memories.length,
-          lastActivityAt: session.lastActivityAt,
-          timeSinceInterruption: Date.now() - session.lastActivityAt.getTime(),
+          lastActivityAt: sessionItem.lastActivityAt,
+          timeSinceInterruption: Date.now() - sessionItem.lastActivityAt.getTime(),
         });
       }
     }
@@ -52,25 +56,24 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[GET /api/workflow/continuation] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to detect workflow continuations" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to detect workflow continuations" }, { status: 500 });
   }
 }
 
 // POST /api/workflow/continuation — Resume a workflow
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { snapshotId, sessionId } = body;
 
     const id = snapshotId || sessionId;
     if (!id) {
-      return NextResponse.json(
-        { error: "snapshotId or sessionId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "snapshotId or sessionId is required" }, { status: 400 });
     }
 
     const result = await resumeWorkflow(id);
@@ -101,9 +104,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[POST /api/workflow/continuation] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to resume workflow" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to resume workflow" }, { status: 500 });
   }
 }

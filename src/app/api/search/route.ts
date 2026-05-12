@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 interface SearchResultItem {
   id: string;
@@ -24,12 +25,10 @@ function calculateScore(
   const lowerText = text.toLowerCase();
   let score = 0;
 
-  // Exact phrase match bonus
   if (lowerText.includes(query.toLowerCase())) {
     score += 10;
   }
 
-  // Individual term matches
   for (const term of queryTerms) {
     if (!term) continue;
     const lowerTerm = term.toLowerCase();
@@ -37,13 +36,11 @@ function calculateScore(
     let count = 0;
     while (index !== -1) {
       count++;
-      // Bonus for matches near the beginning
       if (index < 100) score += 3;
       else if (index < 200) score += 2;
       else score += 1;
       index = lowerText.indexOf(lowerTerm, index + 1);
     }
-    // Bonus for multiple occurrences of same term
     if (count > 1) score += count * 0.5;
   }
 
@@ -53,6 +50,11 @@ function calculateScore(
 // GET /api/search — Semantic search endpoint
 export async function GET(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q") || "";
     const type = searchParams.get("type") || undefined;
@@ -67,9 +69,10 @@ export async function GET(request: NextRequest) {
 
     const queryTerms = query.trim().split(/\s+/);
     const results: SearchResultItem[] = [];
+    const userId = session.user.id;
 
     // Search memories
-    const memoryWhere: Record<string, unknown> = {};
+    const memoryWhere: Record<string, unknown> = { userId };
     if (type) memoryWhere.type = type;
     if (projectId) memoryWhere.projectId = projectId;
 
@@ -119,6 +122,7 @@ export async function GET(request: NextRequest) {
     // Search sessions
     const sessions = await db.session.findMany({
       where: {
+        userId,
         OR: [
           { title: { contains: query } },
           { task: { contains: query } },
@@ -130,34 +134,34 @@ export async function GET(request: NextRequest) {
       orderBy: { startedAt: "desc" },
     });
 
-    for (const session of sessions) {
+    for (const sessionItem of sessions) {
       const searchableText = [
-        session.title,
-        session.task,
-        session.intent,
-        session.summary,
+        sessionItem.title,
+        sessionItem.task,
+        sessionItem.intent,
+        sessionItem.summary,
       ]
         .filter(Boolean)
         .join(" ");
       const score = calculateScore(searchableText, query, queryTerms);
       if (score > 0) {
         results.push({
-          id: session.id,
+          id: sessionItem.id,
           type: "session",
-          title: session.title,
-          content: session.task || session.summary || session.intent || "",
+          title: sessionItem.title,
+          content: sessionItem.task || sessionItem.summary || sessionItem.intent || "",
           score,
-          createdAt: session.startedAt.toISOString(),
+          createdAt: sessionItem.startedAt.toISOString(),
           metadata: {
-            isActive: session.isActive,
-            project: session.project,
+            isActive: sessionItem.isActive,
+            project: sessionItem.project,
           },
         });
       }
     }
 
     // Search timeline events
-    const timelineWhere: Record<string, unknown> = {};
+    const timelineWhere: Record<string, unknown> = { userId };
     if (type) timelineWhere.type = type;
 
     const timelineEvents = await db.timelineEvent.findMany({
@@ -195,7 +199,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Sort by score descending
     results.sort((a, b) => b.score - a.score);
 
     // Log the search query
@@ -204,6 +207,7 @@ export async function GET(request: NextRequest) {
         query: query.trim(),
         results: JSON.stringify(results.slice(0, 20).map((r) => r.id)),
         filters: JSON.stringify({ type, projectId }),
+        userId,
       },
     });
 
@@ -224,6 +228,11 @@ export async function GET(request: NextRequest) {
 // POST /api/search — Advanced search with filters in body
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const {
       q = "",
@@ -245,7 +254,7 @@ export async function POST(request: NextRequest) {
 
     const query = q.trim();
     const queryTerms = query.split(/\s+/);
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { userId: session.user.id };
 
     if (type) {
       if (Array.isArray(type)) {
@@ -285,7 +294,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Tag-based search: tags are stored as JSON array strings
     if (tags && Array.isArray(tags) && tags.length > 0) {
       const tagConditions = tags.map((tag: string) => ({
         tags: { contains: tag },
@@ -293,7 +301,6 @@ export async function POST(request: NextRequest) {
       where.OR = [...(where.OR as unknown[] || []), ...tagConditions];
     }
 
-    // Text search
     const textSearchConditions = [
       { content: { contains: query } },
       { summary: { contains: query } },
@@ -353,12 +360,12 @@ export async function POST(request: NextRequest) {
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    // Log search
     await db.searchQuery.create({
       data: {
         query,
         results: JSON.stringify(results.slice(0, 50).map((r) => r.id)),
         filters: JSON.stringify({ type, projectId, domain, tags, dateRange, isSensitive }),
+        userId: session.user.id,
       },
     });
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/import/[id] — Get import details
 export async function GET(
@@ -7,40 +8,25 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
+    const importConfig = await db.memoryImport.findUnique({ where: { id } });
 
-    const importConfig = await db.memoryImport.findUnique({
-      where: { id },
-    });
-
-    if (!importConfig) {
-      return NextResponse.json(
-        { error: "Import configuration not found" },
-        { status: 404 }
-      );
+    if (!importConfig || importConfig.userId !== session.user.id) {
+      return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
     }
 
     let parsedMetadata: Record<string, unknown> = {};
-    try {
-      parsedMetadata = importConfig.metadata
-        ? JSON.parse(importConfig.metadata)
-        : {};
-    } catch {
-      parsedMetadata = {};
-    }
+    try { parsedMetadata = importConfig.metadata ? JSON.parse(importConfig.metadata) : {}; } catch { parsedMetadata = {}; }
 
-    return NextResponse.json({
-      data: {
-        ...importConfig,
-        metadata: parsedMetadata,
-      },
-    });
+    return NextResponse.json({ data: { ...importConfig, metadata: parsedMetadata } });
   } catch (error) {
     console.error("[GET /api/import/[id]] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch import details" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch import details" }, { status: 500 });
   }
 }
 
@@ -50,29 +36,20 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-
-    const importConfig = await db.memoryImport.findUnique({
-      where: { id },
-    });
-
-    if (!importConfig) {
-      return NextResponse.json(
-        { error: "Import configuration not found" },
-        { status: 404 }
-      );
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Update status to processing
-    await db.memoryImport.update({
-      where: { id },
-      data: {
-        status: "processing",
-      },
-    });
+    const { id } = await params;
+    const importConfig = await db.memoryImport.findUnique({ where: { id } });
 
-    // Simulate async import processing
-    // In production, this would trigger a background job/queue
+    if (!importConfig || importConfig.userId !== session.user.id) {
+      return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
+    }
+
+    await db.memoryImport.update({ where: { id }, data: { status: "processing" } });
+
     const itemsImported = Math.floor(Math.random() * 50) + 1;
     const itemsFailed = Math.random() > 0.8 ? Math.floor(Math.random() * 3) : 0;
 
@@ -83,26 +60,17 @@ export async function POST(
         itemsImported,
         itemsFailed,
         lastSyncAt: new Date(),
-        error:
-          itemsFailed > 0
-            ? `Failed to import ${itemsFailed} item(s)`
-            : null,
+        error: itemsFailed > 0 ? `Failed to import ${itemsFailed} item(s)` : null,
       },
     });
 
     return NextResponse.json({
       data: updatedImport,
-      message:
-        itemsFailed > 0
-          ? `Import completed with ${itemsFailed} error(s)`
-          : "Import completed successfully",
+      message: itemsFailed > 0 ? `Import completed with ${itemsFailed} error(s)` : "Import completed successfully",
     });
   } catch (error) {
     console.error("[POST /api/import/[id]] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to trigger import sync" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to trigger import sync" }, { status: 500 });
   }
 }
 
@@ -112,32 +80,23 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-
-    const importConfig = await db.memoryImport.findUnique({
-      where: { id },
-    });
-
-    if (!importConfig) {
-      return NextResponse.json(
-        { error: "Import configuration not found" },
-        { status: 404 }
-      );
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    await db.memoryImport.delete({
-      where: { id },
-    });
+    const { id } = await params;
+    const importConfig = await db.memoryImport.findUnique({ where: { id } });
 
-    return NextResponse.json({
-      data: { id, deleted: true },
-      message: "Import configuration removed successfully",
-    });
+    if (!importConfig || importConfig.userId !== session.user.id) {
+      return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
+    }
+
+    await db.memoryImport.delete({ where: { id } });
+
+    return NextResponse.json({ data: { id, deleted: true }, message: "Import configuration removed successfully" });
   } catch (error) {
     console.error("[DELETE /api/import/[id]] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to remove import configuration" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to remove import configuration" }, { status: 500 });
   }
 }

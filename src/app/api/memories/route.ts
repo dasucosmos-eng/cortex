@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/memories — List memories with filters and pagination
 export async function GET(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(
@@ -16,7 +22,7 @@ export async function GET(request: NextRequest) {
     const isSensitive = searchParams.get("isSensitive");
     const query = searchParams.get("q") || undefined;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { userId: session.user.id };
 
     if (type) {
       where.type = type;
@@ -89,6 +95,11 @@ export async function GET(request: NextRequest) {
 // POST /api/memories — Create a new memory
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
 
     const {
@@ -147,6 +158,7 @@ export async function POST(request: NextRequest) {
         isSensitive: Boolean(isSensitive),
         summary: generatedSummary,
         metadata: metadata || null,
+        userId: session.user.id,
       },
       include: {
         session: {

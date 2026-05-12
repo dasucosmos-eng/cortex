@@ -2,7 +2,7 @@ import { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import { db } from '@/lib/db'
-import crypto from 'crypto'
+import bcrypt from 'bcryptjs'
 
 export const authOptions: NextAuthOptions = {
   // Prisma Adapter for database storage
@@ -17,14 +17,10 @@ export const authOptions: NextAuthOptions = {
   // Pages configuration
   pages: {
     signIn: '/login',
-    signOut: '/login',
-    error: '/login',
-    newUser: '/signup',
   },
 
   // Providers
   providers: [
-    // Credentials provider — email + password with SHA-256 hash comparison
     CredentialsProvider({
       name: 'credentials',
       credentials: {
@@ -47,23 +43,8 @@ export const authOptions: NextAuthOptions = {
           where: { email: credentials.email },
         })
 
-        // Auto-create account if not exists (for demo purposes)
         if (!user) {
-          const hashedPassword = hashPassword(credentials.password)
-          const newUser = await db.user.create({
-            data: {
-              email: credentials.email,
-              name: credentials.email.split('@')[0],
-              password: hashedPassword,
-              role: 'user',
-            },
-          })
-          return {
-            id: newUser.id,
-            email: newUser.email,
-            name: newUser.name,
-            role: newUser.role,
-          }
+          throw new Error('Invalid email or password')
         }
 
         // Verify password against stored hash
@@ -71,9 +52,9 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Account was created with OAuth. Please use OAuth provider to sign in.')
         }
 
-        const isValid = verifyPassword(credentials.password, user.password)
+        const isValid = await bcrypt.compare(credentials.password, user.password)
         if (!isValid) {
-          throw new Error('Invalid password')
+          throw new Error('Invalid email or password')
         }
 
         return {
@@ -84,20 +65,6 @@ export const authOptions: NextAuthOptions = {
         }
       },
     }),
-
-    // Google provider placeholder — configured but disabled
-    // Uncomment and add env vars to enable:
-    // GoogleProvider({
-    //   clientId: process.env.GOOGLE_CLIENT_ID ?? '',
-    //   clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
-    // }),
-
-    // GitHub provider placeholder — configured but disabled
-    // Uncomment and add env vars to enable:
-    // GitHubProvider({
-    //   clientId: process.env.GITHUB_CLIENT_ID ?? '',
-    //   clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '',
-    // }),
   ],
 
   // Custom JWT callback — include user.id and user.role in token
@@ -133,26 +100,11 @@ export const authOptions: NextAuthOptions = {
 // Server-side helpers
 // ============================================================
 
+import { getServerSession as nextAuthGetServerSession } from 'next-auth'
+
 export async function getServerSession(options?: Record<string, unknown>) {
-  // Dynamic import to avoid circular dependency
-  const { getServerSession: nextAuthGetServerSession } = await import('next-auth')
   return nextAuthGetServerSession(authOptions)
 }
 
-// ============================================================
-// Password utilities
-// ============================================================
-
-/** Hash a password using SHA-256 (demo only — use bcrypt in production) */
-export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex')
-}
-
-/** Verify a password against a stored SHA-256 hash */
-export function verifyPassword(password: string, hash: string): boolean {
-  const computedHash = crypto.createHash('sha256').update(password).digest('hex')
-  return crypto.timingSafeEqual(
-    Buffer.from(computedHash),
-    Buffer.from(hash)
-  )
-}
+// Re-export for convenience
+export { getServerSession as auth }

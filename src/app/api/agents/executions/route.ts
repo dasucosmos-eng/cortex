@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrchestrator } from "@/lib/ai/agent-orchestrator";
+import { auth } from "@/lib/auth";
 
 // GET /api/agents/executions — List recent agent executions
 export async function GET(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get("limit") || "20", 10);
     const status = searchParams.get("status");
@@ -33,9 +39,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[GET /api/agents/executions] Error:", error);
-    return NextResponse.json(
-      { error: "Failed to list executions" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to list executions" }, { status: 500 });
   }
 }

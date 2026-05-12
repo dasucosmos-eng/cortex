@@ -1,22 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { randomBytes, createDecipheriv } from "crypto";
 
-// In-memory encryption key (must match the one in vault/route.ts)
 let encryptionKey: Buffer | null = null;
 
 function getEncryptionKey(): Buffer {
   if (encryptionKey) return encryptionKey;
-  // Generate a 256-bit (32 byte) key for AES-256
   encryptionKey = randomBytes(32);
   return encryptionKey;
 }
 
-/**
- * Decrypt data using AES-256-GCM.
- * Takes encryptedData, iv, and authTag all as hex strings.
- * Returns plaintext string.
- */
 function decrypt(
   encryptedData: string,
   ivHex: string,
@@ -41,27 +35,25 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
 
     if (!id) {
-      return NextResponse.json(
-        { error: "Vault item ID is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Vault item ID is required" }, { status: 400 });
     }
 
     const vaultItem = await db.vaultItem.findUnique({
       where: { id },
     });
 
-    if (!vaultItem) {
-      return NextResponse.json(
-        { error: "Vault item not found" },
-        { status: 404 }
-      );
+    if (!vaultItem || vaultItem.userId !== session.user.id) {
+      return NextResponse.json({ error: "Vault item not found" }, { status: 404 });
     }
 
-    // Decrypt the data
     const plaintext = decrypt(
       vaultItem.encryptedData,
       vaultItem.iv,
@@ -94,34 +86,29 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
 
     if (!id) {
-      return NextResponse.json(
-        { error: "Vault item ID is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Vault item ID is required" }, { status: 400 });
     }
 
     const vaultItem = await db.vaultItem.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
 
-    if (!vaultItem) {
-      return NextResponse.json(
-        { error: "Vault item not found" },
-        { status: 404 }
-      );
+    if (!vaultItem || vaultItem.userId !== session.user.id) {
+      return NextResponse.json({ error: "Vault item not found" }, { status: 404 });
     }
 
-    await db.vaultItem.delete({
-      where: { id },
-    });
+    await db.vaultItem.delete({ where: { id } });
 
-    return NextResponse.json({
-      message: "Vault item deleted successfully",
-    });
+    return NextResponse.json({ message: "Vault item deleted successfully" });
   } catch (error) {
     console.error("[DELETE /api/vault/[id]] Error:", error);
     return NextResponse.json(

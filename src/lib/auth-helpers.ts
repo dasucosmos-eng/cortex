@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { authOptions } from '@/lib/auth'
 
@@ -6,22 +6,14 @@ import { authOptions } from '@/lib/auth'
 // Password Utilities
 // ============================================================
 
-/** Hash a password using SHA-256 (demo only — use bcrypt in production) */
-export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex')
+/** Hash a password using bcrypt (12 salt rounds) */
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 12)
 }
 
-/** Verify a password against a stored SHA-256 hash */
-export function verifyPassword(password: string, hash: string): boolean {
-  const computedHash = crypto.createHash('sha256').update(password).digest('hex')
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(computedHash),
-      Buffer.from(hash)
-    )
-  } catch {
-    return false
-  }
+/** Verify a password against a stored bcrypt hash */
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash)
 }
 
 // ============================================================

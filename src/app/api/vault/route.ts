@@ -1,28 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { randomBytes, createCipheriv } from "crypto";
 
-// In-memory encryption key (in production, use OS keychain / KMS)
 let encryptionKey: Buffer | null = null;
 
 function getEncryptionKey(): Buffer {
   if (encryptionKey) return encryptionKey;
-  // Generate a 256-bit (32 byte) key for AES-256
   encryptionKey = randomBytes(32);
   return encryptionKey;
 }
 
-/**
- * Encrypt plaintext using AES-256-GCM.
- * Returns { encryptedData, iv, authTag } all as hex strings.
- */
 function encrypt(plaintext: string): {
   encryptedData: string;
   iv: string;
   authTag: string;
 } {
   const key = getEncryptionKey();
-  const iv = randomBytes(12); // 12 bytes IV recommended for GCM
+  const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
 
   let encrypted = cipher.update(plaintext, "utf8", "hex");
@@ -37,10 +32,16 @@ function encrypt(plaintext: string): {
   };
 }
 
-// GET /api/vault — List vault items (safe fields only, never return encrypted data)
+// GET /api/vault — List vault items (safe fields only)
 export async function GET() {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const items = await db.vaultItem.findMany({
+      where: { userId: session.user.id },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -65,14 +66,16 @@ export async function GET() {
 // POST /api/vault — Store a new encrypted item
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { type, label, data, domain } = body;
 
     if (!type || typeof type !== "string" || type.trim().length === 0) {
-      return NextResponse.json(
-        { error: "Type is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Type is required" }, { status: 400 });
     }
 
     if (!label || typeof label !== "string" || label.trim().length === 0) {
@@ -97,7 +100,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Encrypt the data
     const { encryptedData, iv, authTag } = encrypt(data);
 
     const vaultItem = await db.vaultItem.create({
@@ -108,6 +110,7 @@ export async function POST(request: NextRequest) {
         domain: domain || null,
         iv,
         authTag,
+        userId: session.user.id,
       },
       select: {
         id: true,
@@ -120,10 +123,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      {
-        data: vaultItem,
-        message: "Item encrypted and stored successfully",
-      },
+      { data: vaultItem, message: "Item encrypted and stored successfully" },
       { status: 201 }
     );
   } catch (error) {

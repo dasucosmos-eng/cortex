@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
 
 // GET /api/context-capsule — Generate the current context capsule
 export async function GET() {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userId = session.user.id;
+
     // Get active session
     const activeSession = await db.session.findFirst({
-      where: { isActive: true },
+      where: { isActive: true, userId },
     });
 
     // Get recent memories (last 10, exclude sensitive)
     const recentMemories = await db.memory.findMany({
       where: {
+        userId,
         isSensitive: false,
       },
       take: 10,
@@ -44,6 +53,7 @@ export async function GET() {
 
     const todaysTimeline = await db.timelineEvent.findMany({
       where: {
+        userId,
         createdAt: { gte: startOfDay, lt: endOfDay },
       },
       orderBy: { createdAt: "desc" },
@@ -61,7 +71,7 @@ export async function GET() {
     let currentProject = null;
     if (activeSession?.project) {
       currentProject = await db.project.findFirst({
-        where: { name: activeSession.project },
+        where: { name: activeSession.project, userId },
       });
     }
 
@@ -69,7 +79,7 @@ export async function GET() {
     let sessionMemoryCount = 0;
     if (activeSession) {
       sessionMemoryCount = await db.memory.count({
-        where: { sessionId: activeSession.id },
+        where: { sessionId: activeSession.id, userId },
       });
     }
 
@@ -117,7 +127,7 @@ export async function GET() {
         projectName: currentProject?.name || activeSession?.project || null,
         recentMemoryCount: recentMemories.length,
         todayEventCount: todaysTimeline.length,
-        hasSensitiveData: false, // Already filtered out
+        hasSensitiveData: false,
       },
     };
 
