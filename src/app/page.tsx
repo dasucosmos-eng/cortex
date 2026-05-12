@@ -248,8 +248,9 @@ type ViewId =
   | 'extension'
   | 'settings'
 
-const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
+const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode; highlight?: boolean }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+  { id: 'extension', label: 'Install Extension', icon: <Puzzle size={18} />, highlight: true },
   { id: 'current-work', label: 'Current Work', icon: <Zap size={18} /> },
   { id: 'projects', label: 'Projects', icon: <FolderKanban size={18} /> },
   { id: 'timeline', label: 'Timeline', icon: <Clock size={18} /> },
@@ -259,7 +260,6 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'ai-assistant', label: 'AI Assistant', icon: <MessageSquare size={18} /> },
   { id: 'agents', label: 'Agents', icon: <Cpu size={18} /> },
   { id: 'vault', label: 'Vault', icon: <Shield size={18} /> },
-  { id: 'extension', label: 'Extension', icon: <Chrome size={18} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
 ]
 
@@ -468,6 +468,12 @@ export default function DashboardPage() {
   const [activeView, setActiveView] = useState<ViewId>('dashboard')
   const { data: session } = useSession()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showExtensionBanner, setShowExtensionBanner] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cortex_dismiss_ext_banner') !== 'true'
+    }
+    return true
+  })
 
   // Dashboard data
   const [memories, setMemories] = useState<Memory[]>([])
@@ -679,13 +685,20 @@ export default function DashboardPage() {
         <p className="text-sm text-zinc-500 mt-0.5">Here&apos;s your cognitive workspace overview</p>
       </motion.div>
 
-      {/* Install Extension Banner — shown when user has no data */}
-      {!isLoading && memories.length === 0 && sessions.length === 0 && (
+      {/* Install Extension Banner — always visible, dismissible */}
+      {!isLoading && showExtensionBanner && (
         <motion.div
           variants={staggerItem}
-          className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-zinc-900/80 to-cyan-500/10 p-6"
+          className="relative overflow-hidden rounded-xl border border-violet-500/30 bg-gradient-to-br from-violet-500/15 via-zinc-900/80 to-cyan-500/15 p-6"
         >
           <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-violet-500/10 to-transparent rounded-full -translate-y-1/2 translate-x-1/4" />
+          <button
+            onClick={() => { setShowExtensionBanner(false); localStorage.setItem('cortex_dismiss_ext_banner', 'true') }}
+            className="absolute top-3 right-3 w-6 h-6 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+            title="Dismiss"
+          >
+            <ChevronRight size={14} className="rotate-90" />
+          </button>
           <div className="relative flex flex-col md:flex-row items-start md:items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/20">
               <Puzzle size={24} className="text-white" />
@@ -1825,12 +1838,12 @@ export default function DashboardPage() {
                 onClick={() => setActiveView(item.id)}
                 className={`sidebar-nav-item w-full flex items-center gap-2.5 text-left ${
                   activeView === item.id ? 'active' : ''
-                } ${!sidebarOpen ? 'justify-center px-0' : ''}`}
+                } ${item.highlight && !activeView?.includes(item.id) ? '!bg-gradient-to-r !from-violet-500/10 !to-cyan-500/5 !border !border-violet-500/20 !rounded-lg' : ''} ${!sidebarOpen ? 'justify-center px-0' : ''}`}
                 title={!sidebarOpen ? item.label : undefined}
               >
-                <span className="shrink-0 text-zinc-400">{item.icon}</span>
+                <span className={`shrink-0 ${item.highlight ? 'text-violet-400' : 'text-zinc-400'}`}>{item.icon}</span>
                 {sidebarOpen && (
-                  <span className={`text-xs ${activeView === item.id ? 'text-zinc-200 font-medium' : 'text-zinc-500'}`}>
+                  <span className={`text-xs ${activeView === item.id ? 'text-zinc-200 font-medium' : item.highlight ? 'text-violet-300' : 'text-zinc-500'}`}>
                     {item.label}
                   </span>
                 )}
