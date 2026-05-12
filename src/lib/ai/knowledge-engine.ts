@@ -156,9 +156,12 @@ export function extractEntities(text: string): Array<{ id: string; type: string;
 /**
  * Convert memories into a knowledge graph structure.
  */
-export async function buildGraphFromMemories(): Promise<KnowledgeGraph> {
+export async function buildGraphFromMemories(userId?: string): Promise<KnowledgeGraph> {
+  const where: Record<string, unknown> = { isSensitive: false };
+  if (userId) where.userId = userId;
+
   const memories = await db.memory.findMany({
-    where: { isSensitive: false },
+    where,
     include: {
       relatedFrom: true,
       relatedTo: true,

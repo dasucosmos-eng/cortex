@@ -27,6 +27,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    if (syncState.userId && syncState.userId !== session.user.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     return NextResponse.json({
       data: {
         deviceId: syncState.deviceId,
@@ -110,6 +114,10 @@ export async function PUT(request: NextRequest) {
 
     if (!existingState) {
       return NextResponse.json({ error: "Device not registered. Please register first via POST." }, { status: 404 });
+    }
+
+    if (existingState.userId && existingState.userId !== session.user.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     if (syncVersion < existingState.syncVersion) {

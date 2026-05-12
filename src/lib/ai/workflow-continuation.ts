@@ -63,13 +63,15 @@ function formatTimeElapsed(ms: number): string {
  * Detect if any active workflow has been interrupted
  * (no activity for 30+ minutes, browser closed, etc.)
  */
-export async function detectInterruption(sessionId?: string): Promise<SessionActivity[]> {
+export async function detectInterruption(userId?: string, sessionId?: string): Promise<SessionActivity[]> {
   const now = new Date();
   const interruptedSessions: SessionActivity[] = [];
 
-  const whereClause = sessionId
+  const whereClause: Record<string, unknown> = sessionId
     ? { id: sessionId, isActive: true }
     : { isActive: true };
+
+  if (userId) whereClause.userId = userId;
 
   const activeSessions = await db.session.findMany({
     where: whereClause,
@@ -402,8 +404,8 @@ export function getSnapshot(sessionId: string): WorkflowSnapshot | undefined {
 /**
  * Scan for interrupted workflows and generate continuation suggestions.
  */
-export async function scanAndSuggest(): Promise<ContinuationResult[]> {
-  const interrupted = await detectInterruption();
+export async function scanAndSuggest(userId?: string): Promise<ContinuationResult[]> {
+  const interrupted = await detectInterruption(userId);
   const results: ContinuationResult[] = [];
 
   for (const session of interrupted) {

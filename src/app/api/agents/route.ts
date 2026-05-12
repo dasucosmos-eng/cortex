@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
 import { getOrchestrator } from "@/lib/ai/agent-orchestrator";
 import { auth } from "@/lib/auth";
 import type { AgentType } from "@/lib/ai/agent-orchestrator";

@@ -99,9 +99,23 @@ export async function POST(request: NextRequest) {
         const archiveThresholdDate = new Date();
         archiveThresholdDate.setDate(archiveThresholdDate.getDate() - archiveThresholdDays);
 
-        // Archive hybrid memories (not user-specific, but consider the user's data)
+        // Get user's memory IDs for ownership check
+        const userMemoryIds = await db.memory.findMany({
+          where: { userId },
+          select: { id: true },
+        });
+        const memoryIdList = userMemoryIds.map((m) => m.id);
+
+        // Archive hybrid memories linked to user's memories
         const hybridMemories = await db.hybridMemory.findMany({
-          where: { lastAccessed: { lt: archiveThresholdDate }, isArchived: false },
+          where: {
+            OR: [
+              ...(memoryIdList.length > 0 ? [{ memoryId: { in: memoryIdList } }] : []),
+              ...(memoryIdList.length === 0 ? [{ id: "never-match" }] : []),
+            ],
+            lastAccessed: { lt: archiveThresholdDate },
+            isArchived: false,
+          },
           orderBy: { lastAccessed: "asc" },
           take: options?.limit || 100,
         });
@@ -118,7 +132,25 @@ export async function POST(request: NextRequest) {
       }
 
       case "rebuild_hierarchy": {
+        // Get user's memory IDs for ownership filtering
+        const userMemoryIds = await db.memory.findMany({
+          where: { userId },
+          select: { id: true },
+        });
+        const memoryIdList = userMemoryIds.map((m) => m.id);
+
+        const relationWhere: Record<string, unknown> = {};
+        if (memoryIdList.length > 0) {
+          relationWhere.OR = [
+            { fromId: { in: memoryIdList } },
+            { toId: { in: memoryIdList } },
+          ];
+        } else {
+          relationWhere.id = "never-match";
+        }
+
         const memoryRelations = await db.memoryRelation.findMany({
+          where: relationWhere,
           include: {
             from: { select: { id: true, type: true, tags: true, projectId: true } },
             to: { select: { id: true, type: true, tags: true, projectId: true } },

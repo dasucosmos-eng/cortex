@@ -10,6 +10,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
+
     const { searchParams } = new URL(request.url);
     const tier = searchParams.get("tier");
     const minImportance = searchParams.get("minImportance");
@@ -19,7 +21,19 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
     const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
 
+    // Get user's memory IDs for ownership filtering (HybridMemory has no userId field)
+    const userMemoryIds = await db.memory.findMany({
+      where: { userId },
+      select: { id: true },
+    });
+    const memoryIdList = userMemoryIds.map((m) => m.id);
+
     const where: Record<string, unknown> = {};
+    if (memoryIdList.length > 0) {
+      where.memoryId = { in: memoryIdList };
+    } else {
+      where.id = "never-match";
+    }
 
     if (tier) {
       const validTiers = ["short_term", "long_term", "episodic", "semantic", "procedural"];
@@ -63,11 +77,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
+
     const body = await request.json();
     const { memoryId, newTier } = body;
 
     if (!memoryId || typeof memoryId !== "string") {
       return NextResponse.json({ error: "memoryId is required" }, { status: 400 });
+    }
+
+    // Verify the memoryId belongs to the current user
+    const owningMemory = await db.memory.findUnique({
+      where: { id: memoryId },
+      select: { id: true, userId: true },
+    });
+    if (!owningMemory || owningMemory.userId !== userId) {
+      return NextResponse.json({ error: "Memory not found or access denied" }, { status: 404 });
     }
 
     const validTiers = ["short_term", "long_term", "episodic", "semantic", "procedural"];

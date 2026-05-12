@@ -14,10 +14,11 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
     let graph = getCachedGraph();
 
     if (!graph) {
-      graph = await buildGraphFromMemories();
+      graph = await buildGraphFromMemories(userId);
     }
 
     return NextResponse.json({
@@ -42,8 +43,9 @@ export async function POST() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
     invalidateGraphCache();
-    const graph = await buildGraphFromMemories();
+    const graph = await buildGraphFromMemories(userId);
 
     const typeCounts: Record<string, number> = {};
     for (const node of graph.nodes) {

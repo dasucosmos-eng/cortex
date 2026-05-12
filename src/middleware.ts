@@ -1,32 +1,51 @@
-import { withAuth } from 'next-auth/middleware'
+import { NextRequest, NextResponse } from 'next/server'
+import { getToken } from 'next-auth/jwt'
 
-export default withAuth({
-  pages: {
-    signIn: '/login',
-  },
-  callbacks: {
-    authorized({ req, token }) {
-      const { pathname } = req.nextUrl
-      const isLoggedIn = !!token
+export default async function middleware(req: NextRequest) {
+  const pathname = req.nextUrl.pathname
 
-      // Allow auth API routes
-      if (pathname.startsWith('/api/auth')) return true
+  // Allow API routes — auth checks happen inside route handlers
+  if (pathname.startsWith('/api')) {
+    return NextResponse.next()
+  }
 
-      // Allow login and signup pages
-      const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/signup')
+  // Allow static assets
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/icons') ||
+    pathname.startsWith('/extension') ||
+    pathname.startsWith('/download') ||
+    pathname.includes('favicon') ||
+    pathname.includes('.')
+  ) {
+    return NextResponse.next()
+  }
 
-      // Redirect logged-in users away from auth pages
-      if (isLoggedIn && isAuthPage) return false
+  try {
+    const token = await getToken({
+      req,
+      secret: process.env.NEXTAUTH_SECRET || 'cortex-super-secret-key-2024-change-in-production',
+      secureCookie: false,
+    })
 
-      // Allow unauthenticated users to access auth pages
-      if (!isLoggedIn && isAuthPage) return true
+    const isLoggedIn = !!token
+    const isAuthPage = pathname === '/login' || pathname === '/signup'
 
-      // Require auth for everything else
-      return isLoggedIn
-    },
-  },
-})
+    if (isLoggedIn && isAuthPage) {
+      return NextResponse.redirect(new URL('/', req.url))
+    }
+
+    if (!isLoggedIn && !isAuthPage) {
+      return NextResponse.redirect(new URL('/login', req.url))
+    }
+  } catch {
+    // If token check fails, let the request through
+    // Route-level auth will handle it
+  }
+
+  return NextResponse.next()
+}
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|icons|extension).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icons|extension|download).*)'],
 }

@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
+
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q");
 
@@ -23,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     let graph = getCachedGraph();
     if (!graph) {
-      graph = await buildGraphFromMemories();
+      graph = await buildGraphFromMemories(userId);
     }
 
     const { nodes, edges } = searchGraph(graph, query);

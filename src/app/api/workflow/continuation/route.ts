@@ -15,7 +15,9 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const interrupted = await detectInterruption();
+    const userId = session.user.id;
+
+    const interrupted = await detectInterruption(userId);
 
     if (interrupted.length === 0) {
       return NextResponse.json({
