@@ -6,36 +6,47 @@ export async function GET() {
   try {
     const projects = await db.project.findMany({
       orderBy: { createdAt: "desc" },
-      include: {
-        sessions: {
-          select: {
-            id: true,
-            memories: { select: { id: true } },
-          },
-        },
-      },
     });
 
-    const projectsWithCounts = projects.map((project) => {
-      const sessionCount = project.sessions.length;
-      const memoryCount = project.sessions.reduce(
-        (acc, session) => acc + session.memories.length,
-        0
-      );
-
-      return {
-        id: project.id,
-        name: project.name,
-        description: project.description,
-        color: project.color,
-        icon: project.icon,
-        isActive: project.isActive,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-        sessionCount,
-        memoryCount,
-      };
+    const sessions = await db.session.findMany({
+      select: { id: true, project: true },
     });
+
+    const memories = await db.memory.findMany({
+      select: { id: true, projectId: true },
+    });
+
+    // Build counts by matching project name to session.project string
+    const sessionCounts: Record<string, number> = {};
+    const memoryCounts: Record<string, number> = {};
+
+    for (const session of sessions) {
+      if (session.project) {
+        sessionCounts[session.project] = (sessionCounts[session.project] || 0) + 1;
+      }
+    }
+
+    for (const memory of memories) {
+      if (memory.projectId) {
+        const project = projects.find((p) => p.id === memory.projectId);
+        if (project) {
+          memoryCounts[project.name] = (memoryCounts[project.name] || 0) + 1;
+        }
+      }
+    }
+
+    const projectsWithCounts = projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      color: project.color,
+      icon: project.icon,
+      isActive: project.isActive,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      sessionCount: sessionCounts[project.name] || 0,
+      memoryCount: memoryCounts[project.name] || 0,
+    }));
 
     return NextResponse.json({ data: projectsWithCounts });
   } catch (error) {
@@ -60,7 +71,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate project name
     const existing = await db.project.findUnique({
       where: { name: name.trim() },
     });
