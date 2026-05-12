@@ -47,6 +47,8 @@ import {
   Download,
   RotateCcw,
   LogOut,
+  Puzzle,
+  Chrome,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -243,6 +245,7 @@ type ViewId =
   | 'ai-assistant'
   | 'agents'
   | 'vault'
+  | 'extension'
   | 'settings'
 
 const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
@@ -256,6 +259,7 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: React.ReactNode }[] = [
   { id: 'ai-assistant', label: 'AI Assistant', icon: <MessageSquare size={18} /> },
   { id: 'agents', label: 'Agents', icon: <Cpu size={18} /> },
   { id: 'vault', label: 'Vault', icon: <Shield size={18} /> },
+  { id: 'extension', label: 'Extension', icon: <Chrome size={18} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
 ]
 
@@ -674,6 +678,34 @@ export default function DashboardPage() {
         </h1>
         <p className="text-sm text-zinc-500 mt-0.5">Here&apos;s your cognitive workspace overview</p>
       </motion.div>
+
+      {/* Install Extension Banner — shown when user has no data */}
+      {!isLoading && memories.length === 0 && sessions.length === 0 && (
+        <motion.div
+          variants={staggerItem}
+          className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-zinc-900/80 to-cyan-500/10 p-6"
+        >
+          <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-violet-500/10 to-transparent rounded-full -translate-y-1/2 translate-x-1/4" />
+          <div className="relative flex flex-col md:flex-row items-start md:items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/20">
+              <Puzzle size={24} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold text-zinc-100 mb-1">Install the Cortex Extension</h2>
+              <p className="text-xs text-zinc-400 leading-relaxed max-w-lg">
+                Download the Chrome extension to start tracking your browsing, building memories, and getting AI-powered context. 
+                Everything syncs back to this dashboard automatically.
+              </p>
+            </div>
+            <Button
+              onClick={() => setActiveView('extension')}
+              className="shrink-0 bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer"
+            >
+              <Download size={14} className="mr-2" /> Get the Extension
+            </Button>
+          </div>
+        </motion.div>
+      )}
 
       {/* Context Capsule */}
       <motion.div variants={staggerItem}>
@@ -1440,6 +1472,183 @@ export default function DashboardPage() {
     </motion.div>
   )
 
+  const renderExtensionView = () => (
+    <motion.div variants={pageVariants} initial="initial" animate="animate" className="space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-lg font-semibold text-zinc-100">Browser Extension</h2>
+        <p className="text-sm text-zinc-500 mt-0.5">Install the Cortex Chrome extension to unlock full browser memory tracking</p>
+      </div>
+
+      {/* Download Card */}
+      <Card className="glass border-zinc-800/30 overflow-hidden">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 via-transparent to-cyan-500/5" />
+          <CardContent className="relative p-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-5">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/25">
+                <Puzzle size={32} className="text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-zinc-100 mb-1">Cortex Extension for Chrome</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed mb-3">
+                  The extension runs in your browser, tracking your tabs, sessions, and content automatically. 
+                  It captures memories, detects sensitive data, builds your knowledge graph, and syncs everything 
+                  to this dashboard. Without it, you can still use the dashboard manually — but the extension 
+                  makes Cortex truly powerful.
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {['Tab Tracking', 'Auto Memory Capture', 'Sensitive Data Detection', 'Session Management', 'Knowledge Graph', 'Cloud Sync'].map((feature) => (
+                    <Badge key={feature} variant="outline" className="text-[10px] text-violet-400 border-violet-500/20 bg-violet-500/5">
+                      {feature}
+                    </Badge>
+                  ))}
+                </div>
+                <a
+                  href="/download/cortex-extension.zip"
+                  download="cortex-extension.zip"
+                >
+                  <Button className="bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer">
+                    <Download size={14} className="mr-2" /> Download Extension (.zip)
+                  </Button>
+                </a>
+              </div>
+            </div>
+          </CardContent>
+        </div>
+      </Card>
+
+      {/* Installation Steps */}
+      <Card className="glass border-zinc-800/30">
+        <CardContent className="p-6 space-y-5">
+          <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+            <Chrome size={14} className="text-cyan-400" /> Installation Steps
+          </h3>
+          <Separator className="bg-zinc-800/50" />
+          <div className="space-y-5">
+            {[
+              {
+                step: 1,
+                title: 'Download the Extension',
+                description: 'Click the download button above to get the extension zip file. It contains all the extension files needed for Chrome.',
+              },
+              {
+                step: 2,
+                title: 'Extract the ZIP File',
+                description: 'Extract the downloaded zip to a folder on your computer. Remember where you put it — you\'ll need the folder path in the next step.',
+              },
+              {
+                step: 3,
+                title: 'Open Chrome Extensions',
+                description: 'Open Chrome and go to chrome://extensions in your address bar. Alternatively, click the three-dot menu in Chrome, go to "Extensions" and then "Manage Extensions".',
+              },
+              {
+                step: 4,
+                title: 'Enable Developer Mode',
+                description: 'In the top-right corner of the extensions page, toggle on "Developer mode". This reveals additional options for loading unpacked extensions.',
+              },
+              {
+                step: 5,
+                title: 'Load the Extension',
+                description: 'Click the "Load unpacked" button that appears. Select the extracted extension folder. The Cortex icon should appear in your browser toolbar!',
+              },
+              {
+                step: 6,
+                title: 'Connect to Your Account',
+                description: 'Click the Cortex extension icon, then click the settings gear. Enter your server URL and the same email/password you used to sign up on this website. The extension will sync all your browser data to your account.',
+              },
+            ].map((item) => (
+              <div key={item.step} className="flex gap-4">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-cyan-500/20 border border-violet-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="text-xs font-bold text-violet-400">{item.step}</span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-zinc-200 mb-1">{item.title}</p>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">{item.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* How It Works */}
+      <Card className="glass border-zinc-800/30">
+        <CardContent className="p-6 space-y-5">
+          <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+            <Activity size={14} className="text-emerald-400" /> How It Works After Installation
+          </h3>
+          <Separator className="bg-zinc-800/50" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              {
+                icon: <Eye size={18} />,
+                color: 'text-violet-400 bg-violet-500/15 border-violet-500/20',
+                title: 'Tracks Browsing',
+                description: 'Monitors your tabs and navigation in the background. Detects page types (docs, code, social, AI tools) automatically.',
+              },
+              {
+                icon: <Brain size={18} />,
+                color: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/20',
+                title: 'Builds Memories',
+                description: 'Extracts content from pages you visit, creates searchable memories with tags, importance scores, and summaries.',
+              },
+              {
+                icon: <Layers size={18} />,
+                color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/20',
+                title: 'Syncs to Dashboard',
+                description: 'Pushes everything to your account on this website. Your memories, timeline, sessions, and knowledge graph are all visible here.',
+              },
+            ].map((card) => (
+              <div key={card.title} className="glass rounded-xl p-4 border border-zinc-800/30">
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center border mb-3 ${card.color}`}>
+                  {card.icon}
+                </div>
+                <p className="text-xs font-medium text-zinc-200 mb-1">{card.title}</p>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">{card.description}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Troubleshooting */}
+      <Card className="glass border-zinc-800/30">
+        <CardContent className="p-6 space-y-5">
+          <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+            <AlertCircle size={14} className="text-amber-400" /> Troubleshooting
+          </h3>
+          <Separator className="bg-zinc-800/50" />
+          <div className="space-y-3">
+            {[
+              {
+                q: 'The extension icon doesn\'t appear in my toolbar',
+                a: 'Click the puzzle piece icon in Chrome\'s toolbar, then find "Cortex" and click the pin icon next to it to keep it visible.',
+              },
+              {
+                q: 'It says "Offline" in the extension popup',
+                a: 'Go to the extension settings and make sure the server URL is correct. It should be the same URL as this website. Then enter your login credentials.',
+              },
+              {
+                q: 'My browsing data isn\'t showing up on the dashboard',
+                a: 'Make sure tracking is enabled in the extension (the toggle should be blue). Then click "Sync Now" to push your data to the server.',
+              },
+              {
+                q: 'I see "Not authenticated" when trying to sync',
+                a: 'Re-enter your email and password in the extension\'s settings. The token may have expired — signing in again will fix it.',
+              },
+            ].map((item) => (
+              <div key={item.q}>
+                <p className="text-xs font-medium text-zinc-300 mb-1">Q: {item.q}</p>
+                <p className="text-[11px] text-zinc-500 pl-3 border-l-2 border-zinc-800">{item.a}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  )
+
   const renderSettingsView = () => (
     <motion.div variants={pageVariants} initial="initial" animate="animate" className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-100">Settings</h2>
@@ -1574,6 +1783,7 @@ export default function DashboardPage() {
       case 'ai-assistant': return renderAIAssistantView()
       case 'agents': return renderAgentsView()
       case 'vault': return renderVaultView()
+      case 'extension': return renderExtensionView()
       case 'settings': return renderSettingsView()
       default: return renderDashboardView()
     }
