@@ -1,10 +1,10 @@
-# Cortex — AI Cognitive Operating System
+# Memora Bond — AI Browser Memory
 
-An AI-powered cognitive operating system that transforms your browser into a persistent intelligent workspace with memory, contextual understanding, and autonomous AI agents.
+An AI-powered memory bond that transforms your browser into a persistent intelligent workspace with memory, contextual understanding, and autonomous AI agents.
 
 ## Overview
 
-Cortex continuously understands, organizes, remembers, and retrieves your work context across tabs, sessions, projects, research, coding, and workflows. It acts as your AI second brain — a contextual operating system for browser work.
+Memora Bond continuously understands, organizes, remembers, and retrieves your work context across tabs, sessions, projects, research, coding, and workflows. It acts as your AI-powered memory bond — strengthening the connection between your work and your recall.
 
 ## Architecture
 
@@ -187,8 +187,8 @@ Cortex continuously understands, organizes, remembers, and retrieves your work c
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/cortex.git
-cd cortex
+git clone https://github.com/YOUR_USERNAME/memora-bond.git
+cd memora-bond
 
 # Install dependencies
 bun install

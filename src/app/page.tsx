@@ -471,7 +471,7 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showExtensionBanner, setShowExtensionBanner] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('cortex_dismiss_ext_banner') !== 'true'
+      return localStorage.getItem('memora_dismiss_ext_banner') !== 'true'
     }
     return true
   })
@@ -705,7 +705,7 @@ export default function DashboardPage() {
         >
           <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-violet-500/10 to-transparent rounded-full -translate-y-1/2 translate-x-1/4" />
           <button
-            onClick={() => { setShowExtensionBanner(false); localStorage.setItem('cortex_dismiss_ext_banner', 'true') }}
+            onClick={() => { setShowExtensionBanner(false); localStorage.setItem('memora_dismiss_ext_banner', 'true') }}
             className="absolute top-3 right-3 w-6 h-6 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
             title="Dismiss"
           >
@@ -716,7 +716,7 @@ export default function DashboardPage() {
               <Puzzle size={24} className="text-white" />
             </div>
             <div className="flex-1">
-              <h2 className="text-sm font-semibold text-zinc-100 mb-1">Install the Cortex Extension</h2>
+              <h2 className="text-sm font-semibold text-zinc-100 mb-1">Install the Memora Bond Extension</h2>
               <p className="text-xs text-zinc-400 leading-relaxed max-w-lg">
                 Download the Chrome extension to start tracking your browsing, building memories, and getting AI-powered context. 
                 Everything syncs back to this dashboard automatically.
@@ -744,7 +744,7 @@ export default function DashboardPage() {
               <p className="text-xs text-zinc-400 mt-0.5">Upgrade to Pro for unlimited sync, full memory search, and 2GB storage.</p>
             </div>
             <Button onClick={() => setActiveView('settings')} className="shrink-0 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-medium rounded-xl shadow-lg shadow-amber-500/20 transition-all duration-200 cursor-pointer text-xs">
-              Upgrade — $6/month
+              Upgrade — $12/month
             </Button>
           </div>
         </motion.div>
@@ -1531,14 +1531,14 @@ export default function DashboardPage() {
     </motion.div>
   )
 
-  const CHROME_WEBSTORE_URL = process.env.NEXT_PUBLIC_CHROME_WEBSTORE_URL || 'https://chromewebstore.google.com/detail/cortex-ai-browser-memory/pending'
+  const CHROME_WEBSTORE_URL = process.env.NEXT_PUBLIC_CHROME_WEBSTORE_URL || 'https://chromewebstore.google.com/detail/memora-bond-ai-browser-memory/pending'
 
   const renderExtensionView = () => (
     <motion.div variants={pageVariants} initial="initial" animate="animate" className="space-y-6">
       {/* Header */}
       <div>
         <h2 className="text-lg font-semibold text-zinc-100">Browser Extension</h2>
-        <p className="text-sm text-zinc-500 mt-0.5">Install the Cortex Chrome extension to unlock full browser memory tracking</p>
+        <p className="text-sm text-zinc-500 mt-0.5">Install the Memora Bond Chrome extension to unlock full browser memory tracking</p>
       </div>
 
       {/* One-Click Install Card */}
@@ -1551,7 +1551,7 @@ export default function DashboardPage() {
                 <Puzzle size={40} className="text-white" />
               </div>
               <div className="flex-1 text-center md:text-left">
-                <h3 className="text-xl font-bold text-zinc-100 mb-2">Cortex — AI Browser Memory</h3>
+                <h3 className="text-xl font-bold text-zinc-100 mb-2">Memora Bond — AI Browser Memory</h3>
                 <p className="text-sm text-zinc-400 leading-relaxed mb-3">
                   Track your browsing, capture memories automatically, build a knowledge graph, and sync everything 
                   to this dashboard. One click install — no developer mode needed.
@@ -1594,13 +1594,13 @@ export default function DashboardPage() {
                 step: 2,
                 emoji: '📌',
                 title: 'Pin the Extension',
-                description: 'Click the puzzle piece icon in Chrome\'s toolbar, then click the pin next to "Cortex" to keep it visible.',
+                description: 'Click the puzzle piece icon in Chrome\'s toolbar, then click the pin next to "Memora Bond" to keep it visible.',
               },
               {
                 step: 3,
                 emoji: '🔗',
                 title: 'Connect Your Account',
-                description: 'Click the Cortex icon, enter the same email and password you used here. Your data will sync automatically.',
+                description: 'Click the Memora Bond icon, enter the same email and password you used here. Your data will sync automatically.',
               },
             ].map((item) => (
               <div key={item.step} className="text-center space-y-3">
@@ -1667,7 +1667,7 @@ export default function DashboardPage() {
             {[
               {
                 q: 'The extension icon doesn\'t appear in my toolbar',
-                a: 'Click the puzzle piece icon (jigsaw) in Chrome\'s toolbar, find "Cortex" in the dropdown, and click the pin icon next to it to keep it visible.',
+                a: 'Click the puzzle piece icon (jigsaw) in Chrome\'s toolbar, find "Memora Bond" in the dropdown, and click the pin icon next to it to keep it visible.'
               },
               {
                 q: 'It says "Offline" in the extension popup',
@@ -1736,7 +1736,7 @@ export default function DashboardPage() {
               {!subscriptionData.isLocked && (
                 <a href={`/api/paypal/create-subscription`} target="_blank" rel="noopener noreferrer">
                   <Button className="w-full bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer text-xs">
-                    {subscriptionData.isTrial ? 'Upgrade to Pro — $6/month' : 'Manage Subscription'}
+                    {subscriptionData.isTrial ? 'Upgrade to Pro — $12/month' : 'Manage Subscription'}
                   </Button>
                 </a>
               )}
@@ -1869,7 +1869,7 @@ export default function DashboardPage() {
               <Brain size={20} className="text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-zinc-200">Cortex</p>
+              <p className="text-sm font-medium text-zinc-200">Memora Bond</p>
               <p className="text-[10px] text-zinc-500">AI-Powered Browser Memory v0.2.0</p>
             </div>
           </div>
@@ -1915,7 +1915,7 @@ export default function DashboardPage() {
           </div>
           {sidebarOpen && (
             <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
-              <h1 className="text-sm font-semibold text-zinc-100 tracking-tight">Cortex</h1>
+              <h1 className="text-sm font-semibold text-zinc-100 tracking-tight">Memora Bond</h1>
               <p className="text-[9px] text-zinc-600">AI Memory</p>
             </motion.div>
           )}

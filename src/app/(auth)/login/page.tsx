@@ -37,10 +37,10 @@ export default function LoginPage() {
       }
 
       // 4. Store the token in localStorage
-      localStorage.setItem('cortex_token', idToken)
+      localStorage.setItem('memora_token', idToken)
 
       // Also set as cookie so middleware can read it
-      document.cookie = `cortex_token=${idToken}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+      document.cookie = `memora_token=${idToken}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
 
       // 5. Register browser fingerprint
       try {
@@ -91,10 +91,10 @@ export default function LoginPage() {
           <Brain className="w-7 h-7 text-white" />
         </div>
         <h1 className="text-2xl font-bold text-white tracking-tight">
-          Welcome to Cortex
+          Welcome to Memora Bond
         </h1>
         <p className="text-sm text-zinc-400 mt-1.5">
-          Your AI-Powered Second Brain
+          Your AI-Powered Memory Bond
         </p>
       </div>
 
@@ -154,7 +154,7 @@ export default function LoginPage() {
         <span className="text-zinc-500 hover:text-zinc-400 transition-colors cursor-pointer">
           Terms of Service
         </span>
-        . 2-day free trial, then $6/month.
+        . 2-day free trial, then $12/month.
       </p>
     </div>
   )

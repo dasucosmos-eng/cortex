@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cortex — AI Browser Memory",
-  description: "Your AI-powered browser memory extension. Never lose context again.",
+  title: "Memora Bond — AI Browser Memory",
+  description: "Your AI-powered memory bond for the browser. Strengthen the connection between your work and your recall — never lose context again.",
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },

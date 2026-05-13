@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch data based on type
     let data: any[] = []
-    let title = 'Cortex Data Export'
+    let title = 'Memora Bond Data Export'
 
     if (type === 'memories' || !type) {
       const snapshot = await adminDb.collection('memories')
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
         .limit(500)
         .get()
       data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      title = 'Cortex — Memories Export'
+      title = 'Memora Bond — Memories Export'
     } else if (type === 'timeline') {
       let query = adminDb.collection('timeline')
         .where('userId', '==', user.uid)
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       if (endDate) query = query.where('timestamp', '<=', new Date(endDate).toISOString()) as any
       const snapshot = await query.get()
       data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      title = 'Cortex — Timeline Export'
+      title = 'Memora Bond — Timeline Export'
     } else if (type === 'sessions') {
       const snapshot = await adminDb.collection('sessions')
         .where('userId', '==', user.uid)
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
         .limit(200)
         .get()
       data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      title = 'Cortex — Sessions Export'
+      title = 'Memora Bond — Sessions Export'
     } else if (type === 'all') {
       // Export everything as a comprehensive report
       const [memSnap, sesSnap, tlSnap] = await Promise.all([
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
         adminDb.collection('sessions').where('userId', '==', user.uid).orderBy('startedAt', 'desc').limit(50).get(),
         adminDb.collection('timeline').where('userId', '==', user.uid).orderBy('timestamp', 'desc').limit(200).get(),
       ])
-      title = 'Cortex — Complete Data Export'
+      title = 'Memora Bond — Complete Data Export'
     }
 
     // Return data as JSON for client-side PDF generation

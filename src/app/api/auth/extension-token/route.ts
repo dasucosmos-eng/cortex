@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     }
 
     const customToken = await createCustomToken(user.uid)
-    return NextResponse.json({ token: customToken, serverUrl: process.env.NEXT_PUBLIC_CORTEX_SERVER_URL })
+    return NextResponse.json({ token: customToken, serverUrl: process.env.NEXT_PUBLIC_MEMORA_SERVER_URL })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

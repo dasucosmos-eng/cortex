@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Cortex — AI Browser Memory",
+  "name": "Memora Bond — AI Browser Memory",
   "version": "1.0.0",
-  "description": "Your AI-powered second brain for the browser. Track, remember, and recall your work context.",
+  "description": "Your AI-powered memory bond for the browser. Track, remember, and recall your work context — strengthen your cognitive connection.",
   "permissions": [
     "tabs",
     "activeTab",
@@ -14,7 +14,8 @@
     "webNavigation",
     "alarms",
     "contextMenus",
-    "identity"
+    "identity",
+    "cookies"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

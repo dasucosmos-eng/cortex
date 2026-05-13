@@ -1,5 +1,5 @@
 // ============================================================
-// Cortex — AI Browser Memory Extension
+// Memora Bond — AI Browser Memory Extension
 // Content Script — Page Monitoring & Interaction
 // ============================================================
 
@@ -38,7 +38,7 @@
   let lastUrl = currentUrl;
   let lastTitle = document.title;
   let selectionTimeout = null;
-  let cortexButton = null;
+  let memoraButton = null;
   let isInitialized = false;
   let pageContent = null;
 
@@ -273,10 +273,10 @@
     const rect = range.getBoundingClientRect();
 
     const tooltip = document.createElement('div');
-    tooltip.id = 'cortex-selection-tooltip';
+    tooltip.id = 'memora-selection-tooltip';
     tooltip.innerHTML = `
       <style>
-        #cortex-selection-tooltip {
+        #memora-selection-tooltip {
           position: fixed;
           z-index: 2147483647;
           background: rgba(15, 15, 20, 0.92);
@@ -294,14 +294,14 @@
           gap: 6px;
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
           transition: opacity 0.2s, transform 0.2s;
-          animation: cortex-fade-in 0.2s ease;
+          animation: memora-fade-in 0.2s ease;
         }
-        #cortex-selection-tooltip:hover {
+        #memora-selection-tooltip:hover {
           background: rgba(15, 15, 20, 0.98);
           border-color: rgba(16, 185, 129, 0.4);
           transform: translateY(-1px);
         }
-        #cortex-selection-tooltip .cortex-icon {
+        #memora-selection-tooltip .memora-icon {
           width: 16px;
           height: 16px;
           border-radius: 4px;
@@ -312,13 +312,13 @@
           font-size: 10px;
           font-weight: 700;
         }
-        @keyframes cortex-fade-in {
+        @keyframes memora-fade-in {
           from { opacity: 0; transform: translateY(4px); }
           to { opacity: 1; transform: translateY(0); }
         }
       </style>
-      <div class="cortex-icon">C</div>
-      <span>Save to Cortex</span>
+      <div class="memora-icon">M</div>
+      <span>Save to Memora Bond</span>
     `;
 
     // Position above the selection
@@ -370,16 +370,16 @@
   }
 
   function removeSelectionTooltip() {
-    const existing = document.getElementById('cortex-selection-tooltip');
+    const existing = document.getElementById('memora-selection-tooltip');
     if (existing) existing.remove();
   }
 
   function showSavedConfirmation() {
     const confirmation = document.createElement('div');
-    confirmation.id = 'cortex-save-confirmation';
+    confirmation.id = 'memora-save-confirmation';
     confirmation.innerHTML = `
       <style>
-        #cortex-save-confirmation {
+        #memora-save-confirmation {
           position: fixed;
           bottom: 24px;
           right: 24px;
@@ -398,13 +398,13 @@
           align-items: center;
           gap: 8px;
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-          animation: cortex-slide-in 0.3s ease, cortex-fade-out 0.3s ease 2.5s forwards;
+          animation: memora-slide-in 0.3s ease, memora-fade-out 0.3s ease 2.5s forwards;
         }
-        @keyframes cortex-slide-in {
+        @keyframes memora-slide-in {
           from { opacity: 0; transform: translateY(16px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        @keyframes cortex-fade-out {
+        @keyframes memora-fade-out {
           from { opacity: 1; transform: translateY(0); }
           to { opacity: 0; transform: translateY(8px); }
         }
@@ -412,28 +412,28 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M20 6L9 17l-5-5"/>
       </svg>
-      <span>Saved to Cortex</span>
+      <span>Saved to Memora Bond</span>
     `;
 
     document.body.appendChild(confirmation);
     setTimeout(() => {
-      const el = document.getElementById('cortex-save-confirmation');
+      const el = document.getElementById('memora-save-confirmation');
       if (el) el.remove();
     }, 3000);
   }
 
-  // ===== FLOATING CORTEX BUTTON =====
+  // ===== FLOATING MEMORA BOND BUTTON =====
   function createFloatingButton() {
-    if (document.getElementById('cortex-float-btn')) return;
+    if (document.getElementById('memora-float-btn')) return;
 
     const button = document.createElement('div');
-    button.id = 'cortex-float-btn';
+    button.id = 'memora-float-btn';
     button.setAttribute('role', 'button');
-    button.setAttribute('aria-label', 'Save current page to Cortex');
+    button.setAttribute('aria-label', 'Save current page to Memora Bond');
     button.setAttribute('tabindex', '0');
     button.innerHTML = `
       <style>
-        #cortex-float-btn {
+        #memora-float-btn {
           position: fixed;
           bottom: 24px;
           right: 24px;
@@ -451,28 +451,28 @@
           justify-content: center;
           box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 0 rgba(16, 185, 129, 0);
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          animation: cortex-btn-appear 0.5s ease 1s both;
+          animation: memora-btn-appear 0.5s ease 1s both;
           user-select: none;
           -webkit-user-select: none;
         }
-        #cortex-float-btn:hover {
+        #memora-float-btn:hover {
           background: rgba(15, 15, 20, 0.95);
           border-color: rgba(16, 185, 129, 0.4);
           box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(16, 185, 129, 0.15);
           transform: scale(1.05);
         }
-        #cortex-float-btn:active {
+        #memora-float-btn:active {
           transform: scale(0.95);
         }
-        #cortex-float-btn:focus-visible {
+        #memora-float-btn:focus-visible {
           outline: 2px solid #10b981;
           outline-offset: 2px;
         }
-        #cortex-float-btn.cortex-saved {
+        #memora-float-btn.memora-saved {
           border-color: rgba(16, 185, 129, 0.6);
           box-shadow: 0 4px 24px rgba(16, 185, 129, 0.2);
         }
-        #cortex-float-btn .cortex-btn-icon {
+        #memora-float-btn .memora-btn-icon {
           width: 24px;
           height: 24px;
           border-radius: 6px;
@@ -486,7 +486,7 @@
           letter-spacing: -0.5px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        @keyframes cortex-btn-appear {
+        @keyframes memora-btn-appear {
           from {
             opacity: 0;
             transform: translateY(20px) scale(0.8);
@@ -497,7 +497,7 @@
           }
         }
       </style>
-      <div class="cortex-btn-icon">C</div>
+      <div class="memora-btn-icon">M</div>
     `;
 
     button.addEventListener('click', async (e) => {
@@ -523,12 +523,12 @@
         });
 
         // Visual feedback
-        button.classList.add('cortex-saved');
+        button.classList.add('memora-saved');
         showSavedConfirmation();
 
-        setTimeout(() => button.classList.remove('cortex-saved'), 3000);
+        setTimeout(() => button.classList.remove('memora-saved'), 3000);
       } catch (err) {
-        console.error('[Cortex] Failed to save:', err);
+        console.error('[Memora Bond] Failed to save:', err);
       }
     });
 
@@ -541,7 +541,7 @@
     });
 
     document.body.appendChild(button);
-    cortexButton = button;
+    memoraButton = button;
   }
 
   // ===== SPA NAVIGATION DETECTION =====
@@ -596,17 +596,17 @@
     // Re-check if the new URL is sensitive
     const isNewSensitive = SENSITIVE_PATTERNS.some(p => p.test(newUrl));
     if (isNewSensitive) {
-      if (cortexButton) {
-        cortexButton.remove();
-        cortexButton = null;
+      if (memoraButton) {
+        memoraButton.remove();
+        memoraButton = null;
       }
       return;
     }
 
     // Remove existing button and recreate after a delay
-    if (cortexButton) {
-      cortexButton.remove();
-      cortexButton = null;
+    if (memoraButton) {
+      memoraButton.remove();
+      memoraButton = null;
     }
 
     // Wait for page content to load
@@ -687,7 +687,7 @@
       setTimeout(handleTextSelection, 300);
     });
 
-    console.log(`[Cortex] Content script active on ${currentDomain}`);
+    console.log(`[Memora Bond] Content script active on ${currentDomain}`);
   }
 
   // Wait for DOM to be ready

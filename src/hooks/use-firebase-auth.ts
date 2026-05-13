@@ -19,13 +19,13 @@ export function useFirebaseAuth() {
           const token = await user.getIdToken()
           setState({ user, token, loading: false })
           // Store token for middleware cookie
-          document.cookie = `cortex_token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+          document.cookie = `memora_token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
         } catch {
           setState({ user, token: null, loading: false })
         }
       } else {
         setState({ user: null, token: null, loading: false })
-        document.cookie = 'cortex_token=; path=/; max-age=0'
+        document.cookie = 'memora_token=; path=/; max-age=0'
       }
     })
     return () => unsubscribe()
@@ -33,8 +33,8 @@ export function useFirebaseAuth() {
 
   const signOut = useCallback(async () => {
     await firebaseSignOut(auth)
-    localStorage.removeItem('cortex_token')
-    document.cookie = 'cortex_token=; path=/; max-age=0'
+    localStorage.removeItem('memora_token')
+    document.cookie = 'memora_token=; path=/; max-age=0'
     window.location.href = '/login'
   }, [])
 

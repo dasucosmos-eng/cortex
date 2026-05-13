@@ -1,4 +1,4 @@
-# Cortex Icons
+# Memora Bond Icons
 
 This directory should contain the extension icons in PNG format. The provided `icon.svg` is the master design.
 
@@ -43,7 +43,7 @@ rsvg-convert -w 128 -h 128 icon.svg -o icon128.png
 The icon features:
 - **Gradient background**: Emerald green (#10b981) to Cyan (#06b6d4)
 - **Rounded rectangle**: 28px border radius
-- **Center letter "C"**: Bold white, representing "Cortex"
+- **Center letter "M"**: Bold white, representing "Memora"
 - **Neural network dots and lines**: Representing AI memory and connections
 - **Subtle shadow**: For depth
 

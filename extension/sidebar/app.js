@@ -1,5 +1,5 @@
 // ============================================================
-// Cortex — Sidebar Logic
+// Memora Bond — Sidebar Logic
 // ============================================================
 
 (function () {
@@ -633,7 +633,7 @@
   // ===== CLEAR DATA =====
 
   async function clearAllData() {
-    if (!confirm('⚠️ Are you sure you want to clear ALL Cortex data?\n\nThis will permanently delete all memories, sessions, timeline events, and notes. This cannot be undone.')) {
+    if (!confirm('⚠️ Are you sure you want to clear ALL Memora Bond data?\n\nThis will permanently delete all memories, sessions, timeline events, and notes. This cannot be undone.')) {
       return;
     }
 

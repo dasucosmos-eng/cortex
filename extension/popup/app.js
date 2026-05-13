@@ -1,5 +1,5 @@
 // ============================================================
-// Cortex — Popup Logic
+// Memora Bond — Popup Logic
 // ============================================================
 
 (function () {
@@ -37,6 +37,7 @@
     settingsStatus: document.getElementById('settingsStatus'),
     settingsOpenWebBtn: document.getElementById('settingsOpenWebBtn'),
     settingsDisconnectBtn: document.getElementById('settingsDisconnectBtn'),
+    signInBtn: document.getElementById('signInBtn'),
   };
 
   let state = {
@@ -130,7 +131,7 @@
   }
 
   async function handleDisconnect() {
-    if (!confirm('Disconnect from Cortex cloud? Your local data will be preserved.')) return;
+    if (!confirm('Disconnect from Memora Bond cloud? Your local data will be preserved.')) return;
 
     const response = await sendMessage('LOGOUT');
     if (response.success) {
@@ -148,7 +149,7 @@
   function openWebSettings() {
     const url = authData?.serverUrl
       ? `${authData.serverUrl}/settings`
-      : 'https://cortex-ai-memory.web.app/settings';
+      : 'https://memora.bond/settings';
     chrome.tabs.create({ url });
     window.close();
   }
@@ -162,9 +163,11 @@
       if (isAuthenticated) {
         els.authDot.className = 'indicator-dot online';
         els.authStatusText.textContent = 'Connected';
+        if (els.signInBtn) els.signInBtn.style.display = 'none';
       } else {
         els.authDot.className = 'indicator-dot offline';
         els.authStatusText.textContent = 'Offline';
+        if (els.signInBtn) els.signInBtn.style.display = 'flex';
       }
     }
 
@@ -195,6 +198,27 @@
         els.agentsBadge.style.display = 'none';
       }
     }
+  }
+
+  async function handleSignIn() {
+    if (els.signInBtn) els.signInBtn.disabled = true;
+    await sendMessage('SIGN_IN_WEBSITE');
+  }
+
+  async function pollForAuth() {
+    // Poll every 2 seconds for 60 seconds to check if user signed in on website
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const response = await sendMessage('CHECK_WEBSITE_AUTH');
+      if (response.success && response.authenticated) {
+        els.authDot.className = 'indicator-dot online';
+        els.authStatusText.textContent = 'Connected';
+        if (els.signInBtn) els.signInBtn.style.display = 'none';
+        await loadAuthAndSync();
+        return;
+      }
+    }
+    if (els.signInBtn) els.signInBtn.disabled = false;
   }
 
   async function handleSyncNow() {
@@ -415,7 +439,7 @@
   }
 
   async function clearData() {
-    if (!confirm('Are you sure you want to clear all Cortex data? This cannot be undone.')) return;
+    if (!confirm('Are you sure you want to clear all Memora Bond data? This cannot be undone.')) return;
 
     const response = await sendMessage('CLEAR_DATA');
     if (response.success) {
@@ -465,6 +489,7 @@
   });
   if (els.settingsDisconnectBtn) els.settingsDisconnectBtn.addEventListener('click', handleDisconnect);
   if (els.settingsOpenWebBtn) els.settingsOpenWebBtn.addEventListener('click', openWebSettings);
+  if (els.signInBtn) els.signInBtn.addEventListener('click', () => { handleSignIn(); pollForAuth(); });
 
   // ===== INIT =====
   loadStatus();

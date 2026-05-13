@@ -13,9 +13,9 @@ export async function generateBrowserFingerprint(): Promise<string> {
       ctx.fillStyle = '#f60'
       ctx.fillRect(125, 1, 62, 20)
       ctx.fillStyle = '#069'
-      ctx.fillText('Cortex-fp', 2, 15)
+      ctx.fillText('Memora-fp', 2, 15)
       ctx.fillStyle = 'rgba(102, 204, 0, 0.7)'
-      ctx.fillText('Cortex-fp', 4, 17)
+      ctx.fillText('Memora-fp', 4, 17)
       components.push(canvas.toDataURL())
     }
   } catch {}

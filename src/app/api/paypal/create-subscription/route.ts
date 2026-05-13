@@ -24,12 +24,12 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         plan_id: PLAN_ID,
         application_context: {
-          brand_name: 'Cortex — AI Browser Memory',
+          brand_name: 'Memora Bond — AI Browser Memory',
           locale: 'en-US',
           shipping_preference: 'NO_SHIPPING',
           user_action: 'SUBSCRIBE_NOW',
-          return_url: `${process.env.NEXT_PUBLIC_CORTEX_SERVER_URL}/api/paypal/return?uid=${user.uid}`,
-          cancel_url: `${process.env.NEXT_PUBLIC_CORTEX_SERVER_URL}/settings?cancelled=true`,
+          return_url: `${process.env.NEXT_PUBLIC_MEMORA_SERVER_URL}/api/paypal/return?uid=${user.uid}`,
+          cancel_url: `${process.env.NEXT_PUBLIC_MEMORA_SERVER_URL}/settings?cancelled=true`,
         },
         custom_id: user.uid,
       }),

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex</title>
+  <title>Memora Bond</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -615,9 +615,9 @@
   <div class="header">
     <div class="header-row">
       <div class="logo">
-        <div class="logo-icon">C</div>
+        <div class="logo-icon">M</div>
         <div>
-          <div class="logo-text">Cortex <span>v1.0</span></div>
+          <div class="logo-text">Memora Bond <span>v1.0</span></div>
           <div class="tracking-status" id="trackingStatus">
             <div class="dot active" id="trackingDot"></div>
             <span id="trackingLabel">Tracking active</span>
@@ -644,6 +644,10 @@
       <div class="indicator-dot offline" id="authDot"></div>
       <span id="authStatusText">Offline</span>
     </div>
+    <button class="action-btn" id="signInBtn" style="flex:none;height:24px;font-size:10px;padding:0 10px;display:none;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+      Sign In
+    </button>
     <div class="status-indicator" id="syncStatusIndicator">
       <div class="indicator-dot offline" id="syncDot"></div>
       <span id="syncStatusText">Not synced</span>
@@ -728,7 +732,7 @@
 
   <!-- Footer -->
   <div class="footer">
-    <div class="footer-text">Cortex — Your AI-powered second brain</div>
+    <div class="footer-text">Memora Bond — Your AI-powered memory bond</div>
   </div>
 
   <!-- Settings Panel Overlay -->

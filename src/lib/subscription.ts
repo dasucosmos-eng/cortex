@@ -4,7 +4,7 @@ import { FieldValue } from 'firebase-admin/firestore'
 const STORAGE_LIMIT_FREE = 0 // No storage for expired users
 const STORAGE_LIMIT_PAID = 2 * 1024 * 1024 * 1024 // 2GB in bytes
 const TRIAL_DURATION_DAYS = 2
-const MONTHLY_PRICE_USD = 6
+const MONTHLY_PRICE_USD = 12
 
 export interface SubscriptionInfo {
   userId: string

@@ -1,5 +1,5 @@
 // ============================================================
-// Cortex — AI Browser Memory Extension
+// Memora Bond — AI Browser Memory Extension
 // Background Service Worker (Manifest V3)
 // ============================================================
 
@@ -131,7 +131,7 @@ async function persistCriticalState() {
       _lastPersist: Date.now(),
     });
   } catch (err) {
-    console.error('[Cortex] Failed to persist state:', err);
+    console.error('[Memora Bond] Failed to persist state:', err);
   }
 }
 
@@ -156,7 +156,7 @@ async function restoreCriticalState() {
       workspaceContexts = new Map(entries);
     }
   } catch (err) {
-    console.error('[Cortex] Failed to restore state:', err);
+    console.error('[Memora Bond] Failed to restore state:', err);
   }
 }
 
@@ -290,7 +290,7 @@ function handleTabCreated(tab) {
     title: tab.title || '',
   });
 
-  console.log(`[Cortex] Tab created: ${tab.id} - ${tab.title || 'Untitled'}`);
+  console.log(`[Memora Bond] Tab created: ${tab.id} - ${tab.title || 'Untitled'}`);
 }
 
 function handleTabUpdated(tabId, changeInfo, tab) {
@@ -373,7 +373,7 @@ function handleTabRemoved(tabId, removeInfo) {
     }
   }
 
-  console.log(`[Cortex] Tab removed: ${tabId}`);
+  console.log(`[Memora Bond] Tab removed: ${tabId}`);
 }
 
 function handleTabActivated(activeInfo) {
@@ -546,7 +546,7 @@ async function ensureActiveSession(tab) {
     };
 
     await addToStorage(STORAGE_KEYS.SESSIONS, { ...activeSession }, MAX_SESSIONS);
-    console.log(`[Cortex] Session started: ${activeSession.title}`);
+    console.log(`[Memora Bond] Session started: ${activeSession.title}`);
   }
 
   // Update tab count
@@ -589,7 +589,7 @@ async function endSession(session) {
     await setStorage(STORAGE_KEYS.SESSIONS, sessions);
   }
 
-  console.log(`[Cortex] Session ended: ${session.title} (${formatDuration(session.duration)})`);
+  console.log(`[Memora Bond] Session ended: ${session.title} (${formatDuration(session.duration)})`);
 }
 
 async function updateSession(session) {
@@ -641,7 +641,7 @@ async function tryExtractContent(tabId, metadata, retries = 2) {
       // Content script may not be loaded yet — retry after a delay
       setTimeout(() => tryExtractContent(tabId, metadata, retries - 1), 2000);
     } else {
-      console.log(`[Cortex] Could not extract content from tab ${tabId}:`, err.message);
+      console.log(`[Memora Bond] Could not extract content from tab ${tabId}:`, err.message);
     }
   }
 }
@@ -685,7 +685,7 @@ async function processExtractedContent(content, metadata) {
     };
 
     await addToStorage(STORAGE_KEYS.VAULT, vaultEntry, 1000);
-    console.log(`[Cortex] Sensitive content vaulted: ${url}`);
+    console.log(`[Memora Bond] Sensitive content vaulted: ${url}`);
     return;
   }
 
@@ -728,7 +728,7 @@ async function processExtractedContent(content, metadata) {
   };
 
   await addToStorage(STORAGE_KEYS.MEMORIES, memory, MAX_MEMORIES);
-  console.log(`[Cortex] Memory stored: ${cleanTitle || url}`);
+  console.log(`[Memora Bond] Memory stored: ${cleanTitle || url}`);
 }
 
 function inferTags(url, domain, pageType, title) {
@@ -949,9 +949,9 @@ async function analyzeBrowsingHistory() {
       topDomains,
     });
 
-    console.log(`[Cortex] History analyzed: ${totalVisits} visits across ${domainGroups.size} domains`);
+    console.log(`[Memora Bond] History analyzed: ${totalVisits} visits across ${domainGroups.size} domains`);
   } catch (err) {
-    console.error('[Cortex] History analysis failed:', err);
+    console.error('[Memora Bond] History analysis failed:', err);
   }
 }
 
@@ -1254,8 +1254,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // ---- Auth messages ----
         case 'AUTHENTICATE': {
-          const result = await authenticate(message.email, message.password);
+          const result = await authenticate(message.token);
           sendResponse({ success: result.success, data: result });
+          break;
+        }
+
+        case 'SIGN_IN_WEBSITE': {
+          // Open the Memora Bond login page so user can sign in with Google
+          chrome.tabs.create({ url: 'https://memora.bond/login?from=extension' });
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'CHECK_WEBSITE_AUTH': {
+          // Check if user is now authenticated on the website (poll for cookie)
+          try {
+            const cookie = await chrome.cookies.get({
+              url: 'https://memora.bond',
+              name: 'memora_token',
+            });
+            if (cookie && cookie.value) {
+              await authenticate(cookie.value);
+              sendResponse({ success: true, authenticated: true });
+            } else {
+              sendResponse({ success: true, authenticated: false });
+            }
+          } catch (err) {
+            sendResponse({ success: false, error: err.message });
+          }
           break;
         }
 
@@ -1361,7 +1387,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
       }
     } catch (err) {
-      console.error('[Cortex] Message handler error:', err);
+      console.error('[Memora Bond] Message handler error:', err);
       sendResponse({ success: false, error: err.message });
     }
   };
@@ -1397,7 +1423,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 
 // Context menu
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === 'save-to-cortex') {
+  if (info.menuItemId === 'save-to-memora') {
     let content = '';
     let title = '';
     let source = 'context_menu';
@@ -1435,7 +1461,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   }
 
-  if (info.menuItemId === 'capture-screenshot-cortex') {
+  if (info.menuItemId === 'capture-screenshot-memora') {
     await captureScreenshot(tab?.id);
   }
 });
@@ -1478,7 +1504,7 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
 // ===== INITIALIZATION =====
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log(`[Cortex] Extension ${details.reason}: v${chrome.runtime.getManifest().version}`);
+  console.log(`[Memora Bond] Extension ${details.reason}: v${chrome.runtime.getManifest().version}`);
 
   // Initialize storage with defaults
   const existing = await getStorage(STORAGE_KEYS.SETTINGS);
@@ -1506,13 +1532,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
   // Create context menus
   chrome.contextMenus.create({
-    id: 'save-to-cortex',
-    title: 'Save to Cortex',
+    id: 'save-to-memora',
+    title: 'Save to Memora Bond',
     contexts: ['selection', 'page', 'link'],
   });
   chrome.contextMenus.create({
-    id: 'capture-screenshot-cortex',
-    title: 'Capture Screenshot to Cortex',
+    id: 'capture-screenshot-memora',
+    title: 'Capture Screenshot to Memora Bond',
     contexts: ['page'],
   });
 
@@ -1531,7 +1557,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Handle extension startup (browser restart)
 chrome.runtime.onStartup.addListener(async () => {
-  console.log('[Cortex] Browser started — resuming tracking');
+  console.log('[Memora Bond] Browser started — resuming tracking');
 
   const settings = await getStorage(STORAGE_KEYS.SETTINGS);
   if (settings?.isTracking) {
@@ -1562,15 +1588,20 @@ const AUTH_STATE = {
   isAuthenticated: false,
   userId: null,
   token: null,
-  serverUrl: 'https://cortex-ai-memory.web.app', // Will be overridden by stored setting
+  serverUrl: 'https://memora.bond', // Will be overridden by stored setting
 };
 
-async function authenticate(serverUrl, email, password) {
+async function authenticate(idToken) {
   try {
-    // Use Firebase custom token from the server
+    const serverUrl = AUTH_STATE.serverUrl;
+
+    // Validate the token by getting a custom token from the server
     const response = await fetch(`${serverUrl}/api/auth/extension-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
     });
     if (!response.ok) {
       const err = await response.json();
@@ -1578,12 +1609,12 @@ async function authenticate(serverUrl, email, password) {
     }
     const data = await response.json();
 
-    AUTH_STATE.token = data.token;
+    AUTH_STATE.token = idToken; // Use the original Firebase ID token for all API calls
     AUTH_STATE.serverUrl = data.serverUrl || serverUrl;
     AUTH_STATE.isAuthenticated = true;
 
     await chrome.storage.local.set({
-      authToken: data.token,
+      authToken: idToken,
       authServerUrl: data.serverUrl || serverUrl,
       isAuthenticated: true,
     });
@@ -1594,10 +1625,10 @@ async function authenticate(serverUrl, email, password) {
     // Trigger initial sync
     await syncData();
 
-    console.log('[Cortex] Authenticated successfully');
+    console.log('[Memora Bond] Authenticated successfully');
     return { success: true };
   } catch (error) {
-    console.error('[Cortex] Auth failed:', error);
+    console.error('[Memora Bond] Auth failed:', error);
     return { success: false, error: error.message };
   }
 }
@@ -1620,10 +1651,25 @@ async function restoreAuth() {
       AUTH_STATE.token = data.authToken;
       AUTH_STATE.serverUrl = data.authServerUrl || AUTH_STATE.serverUrl;
       AUTH_STATE.isAuthenticated = true;
-      console.log('[Cortex] Auth restored from stored token');
+      console.log('[Memora Bond] Auth restored from stored token');
+      return;
+    }
+
+    // Try to read token from website cookie (memora.bond)
+    try {
+      const cookie = await chrome.cookies.get({
+        url: 'https://memora.bond',
+        name: 'memora_token',
+      });
+      if (cookie && cookie.value) {
+        console.log('[Memora Bond] Found token from website cookie, authenticating...');
+        await authenticate(cookie.value);
+      }
+    } catch (cookieErr) {
+      console.log('[Memora Bond] Could not read website cookie:', cookieErr.message);
     }
   } catch (err) {
-    console.error('[Cortex] Failed to restore auth:', err);
+    console.error('[Memora Bond] Failed to restore auth:', err);
   }
 }
 
@@ -1661,10 +1707,10 @@ async function registerDevice() {
       syncState.syncVersion = data.syncVersion || 0;
       syncState.status = 'connected';
       await setStorage('syncVersion', syncState.syncVersion);
-      console.log('[Cortex] Device registered for sync');
+      console.log('[Memora Bond] Device registered for sync');
     }
   } catch (err) {
-    console.error('[Cortex] Device registration failed:', err);
+    console.error('[Memora Bond] Device registration failed:', err);
     syncState.status = 'error';
   }
 }
@@ -1683,12 +1729,29 @@ async function syncData() {
     const sessions = (await getStorage(STORAGE_KEYS.SESSIONS)) || [];
     const timeline = (await getStorage(STORAGE_KEYS.TIMELINE)) || [];
 
-    // Collect local changes — sync ALL data, not just a subset
-    const localChanges = {
-      memories: memories, // Sync ALL memories
-      sessions: sessions.filter(s => s.status === 'ended'),
-      timeline: timeline, // Sync ALL timeline events
-    };
+    // Collect local changes — convert to server-expected format { type, action, data }
+    const localChanges = [];
+
+    // Sync ALL memories as create actions
+    if (Array.isArray(memories)) {
+      for (const m of memories) {
+        localChanges.push({ type: 'memory', action: 'create', data: m });
+      }
+    }
+
+    // Sync ended sessions
+    if (Array.isArray(sessions)) {
+      for (const s of sessions.filter(s => s.status === 'ended')) {
+        localChanges.push({ type: 'session', action: 'create', data: s });
+      }
+    }
+
+    // Sync ALL timeline events
+    if (Array.isArray(timeline)) {
+      for (const t of timeline) {
+        localChanges.push({ type: 'timeline', action: 'create', data: t });
+      }
+    }
 
     const response = await fetch(`${AUTH_STATE.serverUrl}/api/sync`, {
       method: 'PUT',
@@ -1716,14 +1779,14 @@ async function syncData() {
         await processRemoteChanges(data.remoteChanges);
       }
 
-      console.log('[Cortex] Sync completed successfully');
+      console.log('[Memora Bond] Sync completed successfully');
       return { status: 'connected', syncVersion: syncState.syncVersion, lastSync: syncState.lastSync };
     }
 
     syncState.status = 'error';
     return { status: 'error' };
   } catch (err) {
-    console.error('[Cortex] Sync failed:', err);
+    console.error('[Memora Bond] Sync failed:', err);
     syncState.status = 'error';
     return { status: 'error', error: err.message };
   }
@@ -1745,7 +1808,7 @@ async function processRemoteChanges(remoteChanges) {
 
     if (added > 0) {
       await setStorage(STORAGE_KEYS.MEMORIES, localMemories.slice(-MAX_MEMORIES));
-      console.log(`[Cortex] Merged ${added} remote memories`);
+      console.log(`[Memora Bond] Merged ${added} remote memories`);
     }
   }
 }
@@ -1831,14 +1894,14 @@ async function checkContinuationSuggestions() {
       chrome.notifications?.create({
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: 'Cortex — Work Continuation',
+        title: 'Memora Bond — Work Continuation',
         message: `You have ${data.suggestions.length} interrupted task${data.suggestions.length > 1 ? 's' : ''}. Click to continue.`,
       });
     }
 
     return { suggestions: data.suggestions || [] };
   } catch (err) {
-    console.error('[Cortex] Continuation check failed:', err);
+    console.error('[Memora Bond] Continuation check failed:', err);
     return { suggestions: [] };
   }
 }
@@ -1889,10 +1952,10 @@ async function captureScreenshot(tabId) {
       chrome.action.setBadgeText({ text: '', tabId });
     }, 2000);
 
-    console.log('[Cortex] Screenshot captured');
+    console.log('[Memora Bond] Screenshot captured');
     return { success: true, screenshotId: screenshot.id };
   } catch (err) {
-    console.error('[Cortex] Screenshot capture failed:', err);
+    console.error('[Memora Bond] Screenshot capture failed:', err);
     return { success: false, error: err.message };
   }
 }
@@ -1931,7 +1994,7 @@ async function processImage(imageData) {
 
     return { success: true, data };
   } catch (err) {
-    console.error('[Cortex] Image processing failed:', err);
+    console.error('[Memora Bond] Image processing failed:', err);
     return { success: false, error: err.message };
   }
 }
@@ -1983,7 +2046,7 @@ async function getKnowledgeGraph() {
     await setStorage('knowledgeGraphCacheTime', getTimestamp());
     return data;
   } catch (err) {
-    console.error('[Cortex] Knowledge graph fetch failed:', err);
+    console.error('[Memora Bond] Knowledge graph fetch failed:', err);
     const cached = await getStorage('knowledgeGraphCache');
     return cached || { nodes: [], edges: [] };
   }
@@ -2043,7 +2106,7 @@ async function getAvailableConnectors() {
 
     return await response.json();
   } catch (err) {
-    console.error('[Cortex] Failed to get connectors:', err);
+    console.error('[Memora Bond] Failed to get connectors:', err);
     return { connectors: [] };
   }
 }
@@ -2074,4 +2137,4 @@ async function createImport(source, externalUrl) {
   }
 }
 
-console.log('[Cortex] Background service worker loaded');
+console.log('[Memora Bond] Background service worker loaded');

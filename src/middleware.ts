@@ -22,7 +22,7 @@ export default async function middleware(req: NextRequest) {
 
   // Check for Firebase token in localStorage (sent via cookie or header)
   // For middleware, we check for a cookie
-  const token = req.cookies.get('cortex_token')?.value
+  const token = req.cookies.get('memora_token')?.value
 
   const isAuthPage = pathname === '/login' || pathname === '/signup'
 

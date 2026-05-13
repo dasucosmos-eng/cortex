@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       currentPeriodEnd: data.currentPeriodEnd,
       daysRemaining,
       paypalSubscriptionId: data.paypalSubscriptionId,
-      price: data.plan === 'pro' ? '$6/month' : 'Free trial',
+      price: data.plan === 'pro' ? '$12/month' : 'Free trial',
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
