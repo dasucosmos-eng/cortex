@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // GET /api/import/[id] — Get import details
 export async function GET(
@@ -8,15 +8,21 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
-    const importConfig = await db.memoryImport.findUnique({ where: { id } });
 
-    if (!importConfig || importConfig.userId !== session.user.id) {
+    const doc = await adminDb.collection("memoryImports").doc(id).get();
+    if (!doc.exists) {
+      return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
+    }
+
+    const importConfig = { id: doc.id, ...doc.data() };
+    if (importConfig.userId !== userId) {
       return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
     }
 
@@ -36,32 +42,49 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
-    const importConfig = await db.memoryImport.findUnique({ where: { id } });
 
-    if (!importConfig || importConfig.userId !== session.user.id) {
+    const doc = await adminDb.collection("memoryImports").doc(id).get();
+    if (!doc.exists) {
+      return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
+    }
+    const importConfig = { id: doc.id, ...doc.data() };
+    if (importConfig.userId !== userId) {
       return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
     }
 
-    await db.memoryImport.update({ where: { id }, data: { status: "processing" } });
+    await adminDb.collection("memoryImports").doc(id).update({
+      status: "processing",
+      updatedAt: new Date().toISOString(),
+    });
 
     const itemsImported = Math.floor(Math.random() * 50) + 1;
     const itemsFailed = Math.random() > 0.8 ? Math.floor(Math.random() * 3) : 0;
 
-    const updatedImport = await db.memoryImport.update({
-      where: { id },
-      data: {
-        status: itemsFailed > 0 ? "failed" : "completed",
-        itemsImported,
-        itemsFailed,
-        lastSyncAt: new Date(),
-        error: itemsFailed > 0 ? `Failed to import ${itemsFailed} item(s)` : null,
-      },
+    const updatedImport = {
+      id,
+      ...importConfig,
+      status: itemsFailed > 0 ? "failed" : "completed",
+      itemsImported,
+      itemsFailed,
+      lastSyncAt: new Date().toISOString(),
+      error: itemsFailed > 0 ? `Failed to import ${itemsFailed} item(s)` : null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await adminDb.collection("memoryImports").doc(id).update({
+      status: updatedImport.status,
+      itemsImported,
+      itemsFailed,
+      lastSyncAt: updatedImport.lastSyncAt,
+      error: updatedImport.error,
+      updatedAt: updatedImport.updatedAt,
     });
 
     return NextResponse.json({
@@ -80,19 +103,24 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
-    const importConfig = await db.memoryImport.findUnique({ where: { id } });
 
-    if (!importConfig || importConfig.userId !== session.user.id) {
+    const doc = await adminDb.collection("memoryImports").doc(id).get();
+    if (!doc.exists) {
+      return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
+    }
+    const importConfig = doc.data();
+    if (importConfig.userId !== userId) {
       return NextResponse.json({ error: "Import configuration not found" }, { status: 404 });
     }
 
-    await db.memoryImport.delete({ where: { id } });
+    await adminDb.collection("memoryImports").doc(id).delete();
 
     return NextResponse.json({ data: { id, deleted: true }, message: "Import configuration removed successfully" });
   } catch (error) {

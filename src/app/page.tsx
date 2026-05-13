@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSession, signOut } from 'next-auth/react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import { useFirebaseAuth, getAuthHeaders } from '@/hooks/use-firebase-auth'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Brain,
@@ -49,6 +49,7 @@ import {
   LogOut,
   Puzzle,
   Chrome,
+  CreditCard,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -466,7 +467,7 @@ function GraphCanvas({ nodes, edges, height = 300 }: { nodes: GraphNode[]; edges
 
 export default function DashboardPage() {
   const [activeView, setActiveView] = useState<ViewId>('dashboard')
-  const { data: session } = useSession()
+  const { user: firebaseUser, token: authToken, loading: authLoading, signOut: firebaseSignOut } = useFirebaseAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showExtensionBanner, setShowExtensionBanner] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -485,6 +486,9 @@ export default function DashboardPage() {
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [executions, setExecutions] = useState<ExecutionRecord[]>([])
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([])
+
+  // Subscription state
+  const [subscriptionData, setSubscriptionData] = useState<any>(null)
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true)
@@ -529,14 +533,15 @@ export default function DashboardPage() {
   const fetchDashboardData = useCallback(async () => {
     setIsLoading(true)
     try {
+      const authH = getAuthHeaders(authToken)
       const [memRes, sesRes, tlRes, projRes, ccRes, kgRes, agRes] = await Promise.all([
-        fetch('/api/memories?limit=20').then((r) => r.json()).catch(() => ({ data: [] })),
-        fetch('/api/sessions').then((r) => r.json()).catch(() => ({ data: [] })),
-        fetch('/api/timeline?limit=15').then((r) => r.json()).catch(() => ({ data: [] })),
-        fetch('/api/projects').then((r) => r.json()).catch(() => ({ data: [] })),
-        fetch('/api/context-capsule').then((r) => r.json()).catch(() => ({ data: null })),
-        fetch('/api/knowledge-graph').then((r) => r.json()).catch(() => ({ data: null })),
-        fetch('/api/agents').then((r) => r.json()).catch(() => ({ data: { agents: [] } })),
+        fetch('/api/memories?limit=20', { headers: authH }).then((r) => r.json()).catch(() => ({ data: [] })),
+        fetch('/api/sessions', { headers: authH }).then((r) => r.json()).catch(() => ({ data: [] })),
+        fetch('/api/timeline?limit=15', { headers: authH }).then((r) => r.json()).catch(() => ({ data: [] })),
+        fetch('/api/projects', { headers: authH }).then((r) => r.json()).catch(() => ({ data: [] })),
+        fetch('/api/context-capsule', { headers: authH }).then((r) => r.json()).catch(() => ({ data: null })),
+        fetch('/api/knowledge-graph', { headers: authH }).then((r) => r.json()).catch(() => ({ data: null })),
+        fetch('/api/agents', { headers: authH }).then((r) => r.json()).catch(() => ({ data: { agents: [] } })),
       ])
 
       setMemories(Array.isArray(memRes.data) ? memRes.data : [])
@@ -546,6 +551,13 @@ export default function DashboardPage() {
       setContextCapsule(ccRes.data || null)
       setGraphData(kgRes.data || null)
       setAgents(Array.isArray(agRes.data?.agents) ? agRes.data.agents : [])
+
+      // Fetch subscription status
+      const subRes = await fetch('/api/paypal/subscription-status', { headers: authH }).catch(() => null)
+      if (subRes?.ok) {
+        const subJson = await subRes.json()
+        setSubscriptionData(subJson)
+      }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err)
     } finally {
@@ -555,7 +567,7 @@ export default function DashboardPage() {
 
   const fetchExecutions = useCallback(async () => {
     try {
-      const res = await fetch('/api/agents/executions?limit=15')
+      const res = await fetch('/api/agents/executions?limit=15', { headers: getAuthHeaders(authToken) })
       const json = await res.json()
       setExecutions(Array.isArray(json.data) ? json.data : [])
     } catch (err) {
@@ -565,7 +577,7 @@ export default function DashboardPage() {
 
   const fetchVault = useCallback(async () => {
     try {
-      const res = await fetch('/api/vault')
+      const res = await fetch('/api/vault', { headers: getAuthHeaders(authToken) })
       const json = await res.json()
       setVaultItems(Array.isArray(json.data) ? json.data : [])
     } catch (err) {
@@ -579,7 +591,7 @@ export default function DashboardPage() {
       params.set('limit', '50')
       if (type && type !== 'all') params.set('type', type)
       if (query) params.set('q', query)
-      const res = await fetch(`/api/memories?${params.toString()}`)
+      const res = await fetch(`/api/memories?${params.toString()}`, { headers: getAuthHeaders(authToken) })
       const json = await res.json()
       setMemories(Array.isArray(json.data) ? json.data : [])
     } catch (err) {
@@ -611,7 +623,7 @@ export default function DashboardPage() {
     setIsSearching(true)
     setSearchResults(null)
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`)
+      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`, { headers: getAuthHeaders(authToken) })
       const json = await res.json()
       setSearchResults(json.data || [])
     } catch (err) {
@@ -636,7 +648,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch('/api/ai/recall', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders(authToken) },
         body: JSON.stringify({ query: chatInput.trim() }),
       })
       const json = await res.json()
@@ -680,13 +692,13 @@ export default function DashboardPage() {
       {/* Welcome Message */}
       <motion.div variants={staggerItem}>
         <h1 className="text-xl font-semibold text-zinc-100">
-          Welcome back{session?.user?.name ? `, ${session.user.name.split(' ')[0]}` : ''}
+          Welcome back{firebaseUser?.displayName ? `, ${firebaseUser.displayName.split(' ')[0]}` : firebaseUser?.email ? `, ${firebaseUser.email.split('@')[0]}` : ''}
         </h1>
         <p className="text-sm text-zinc-500 mt-0.5">Here&apos;s your cognitive workspace overview</p>
       </motion.div>
 
       {/* Install Extension Banner — always visible, dismissible */}
-      {!isLoading && showExtensionBanner && (
+      {!isLoading && !authLoading && showExtensionBanner && (
         <motion.div
           variants={staggerItem}
           className="relative overflow-hidden rounded-xl border border-violet-500/30 bg-gradient-to-br from-violet-500/15 via-zinc-900/80 to-cyan-500/15 p-6"
@@ -720,6 +732,40 @@ export default function DashboardPage() {
         </motion.div>
       )}
 
+      {/* Trial / Subscription Banner */}
+      {subscriptionData && subscriptionData.isTrial && !subscriptionData.isLocked && (
+        <motion.div variants={staggerItem} className="relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-zinc-900/80 to-orange-500/10 p-5">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0">
+              <Clock size={20} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold text-zinc-100">Free Trial — {subscriptionData.daysRemaining} day{subscriptionData.daysRemaining !== 1 ? 's' : ''} remaining</h2>
+              <p className="text-xs text-zinc-400 mt-0.5">Upgrade to Pro for unlimited sync, full memory search, and 2GB storage.</p>
+            </div>
+            <Button onClick={() => setActiveView('settings')} className="shrink-0 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-medium rounded-xl shadow-lg shadow-amber-500/20 transition-all duration-200 cursor-pointer text-xs">
+              Upgrade — $6/month
+            </Button>
+          </div>
+        </motion.div>
+      )}
+      {subscriptionData && subscriptionData.isLocked && (
+        <motion.div variants={staggerItem} className="relative overflow-hidden rounded-xl border border-red-500/20 bg-gradient-to-br from-red-500/10 via-zinc-900/80 to-red-500/10 p-5">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-rose-500 flex items-center justify-center shrink-0">
+              <AlertCircle size={20} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold text-zinc-100">Trial Expired</h2>
+              <p className="text-xs text-zinc-400 mt-0.5">Your free trial has ended. Upgrade to continue using all features.</p>
+            </div>
+            <Button onClick={() => setActiveView('settings')} className="shrink-0 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-medium rounded-xl shadow-lg shadow-red-500/20 transition-all duration-200 cursor-pointer text-xs">
+              Upgrade Now
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
       {/* Context Capsule */}
       <motion.div variants={staggerItem}>
         <div className="glow-border rounded-xl p-5">
@@ -730,7 +776,7 @@ export default function DashboardPage() {
               LIVE
             </Badge>
           </div>
-          {isLoading ? (
+          {isLoading || authLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-4 w-2/3 bg-zinc-800/50" />
               <Skeleton className="h-3 w-full bg-zinc-800/50" />
@@ -1205,7 +1251,7 @@ export default function DashboardPage() {
           size="sm"
           onClick={async () => {
             try {
-              const res = await fetch('/api/knowledge-graph', { method: 'POST' })
+              const res = await fetch('/api/knowledge-graph', { method: 'POST', headers: getAuthHeaders(authToken) })
               const json = await res.json()
               setGraphData(json.data)
             } catch (err) { console.error(err) }
@@ -1651,6 +1697,56 @@ export default function DashboardPage() {
     <motion.div variants={pageVariants} initial="initial" animate="animate" className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-100">Settings</h2>
 
+      {/* Subscription & Billing */}
+      <Card className="glass border-zinc-800/30">
+        <CardContent className="p-5 space-y-4">
+          <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+            <CreditCard size={14} className="text-violet-400" /> Subscription & Billing
+          </h3>
+          <Separator className="bg-zinc-800/50" />
+          {subscriptionData ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-zinc-300">Current Plan</p>
+                  <p className="text-lg font-bold text-zinc-100">{subscriptionData.isTrial ? 'Free Trial' : 'Pro'}</p>
+                </div>
+                <Badge className={subscriptionData.isLocked ? 'bg-red-500/15 text-red-400 border-red-500/20' : subscriptionData.isTrial ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'}>
+                  {subscriptionData.status}
+                </Badge>
+              </div>
+              {subscriptionData.isTrial && !subscriptionData.isLocked && (
+                <p className="text-xs text-amber-400">{subscriptionData.daysRemaining} day{subscriptionData.daysRemaining !== 1 ? 's' : ''} remaining in your trial</p>
+              )}
+              {subscriptionData.isLocked && (
+                <p className="text-xs text-red-400">Your trial has expired. Upgrade to continue syncing data.</p>
+              )}
+              {!subscriptionData.isTrial && (
+                <>
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Storage Used</span>
+                    <span>2 GB limit</span>
+                  </div>
+                  <div className="w-full bg-zinc-800 rounded-full h-1.5">
+                    <div className="bg-gradient-to-r from-violet-500 to-cyan-500 h-1.5 rounded-full" style={{ width: '12%' }} />
+                  </div>
+                  <p className="text-[10px] text-zinc-600">~240 MB of 2 GB used</p>
+                </>
+              )}
+              {!subscriptionData.isLocked && (
+                <a href={`/api/paypal/create-subscription`} target="_blank" rel="noopener noreferrer">
+                  <Button className="w-full bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer text-xs">
+                    {subscriptionData.isTrial ? 'Upgrade to Pro — $6/month' : 'Manage Subscription'}
+                  </Button>
+                </a>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-500">Loading subscription info...</p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Privacy Controls */}
       <Card className="glass border-zinc-800/30">
         <CardContent className="p-5 space-y-5">
@@ -1741,11 +1837,24 @@ export default function DashboardPage() {
             <Settings size={14} className="text-amber-400" /> Data Management
           </h3>
           <Separator className="bg-zinc-800/50" />
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" className="border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800/50">
-              <Download size={12} className="mr-1.5" /> Export All Data
-            </Button>
-            <Button variant="outline" className="border-red-500/20 text-red-400 text-xs hover:bg-red-500/10">
+          <Suspense fallback={<div className="text-xs text-zinc-500">Loading export...</div>}>
+            {(() => {
+              const ExportBtn = lazy(() => import('@/components/export-pdf').then(m => ({ default: m.ExportPDFButton })))
+              return <ExportBtn />
+            })()}
+          </Suspense>
+          <div className="flex flex-wrap gap-3 mt-3">
+            <Button variant="outline" className="border-red-500/20 text-red-400 text-xs hover:bg-red-500/10" onClick={async () => {
+              if (!confirm('Are you sure you want to clear all your data? This cannot be undone.')) return
+              try {
+                await Promise.all([
+                  fetch('/api/memories', { method: 'DELETE', headers: getAuthHeaders(authToken) }).catch(() => {}),
+                  fetch('/api/sessions', { method: 'DELETE', headers: getAuthHeaders(authToken) }).catch(() => {}),
+                  fetch('/api/timeline', { method: 'DELETE', headers: getAuthHeaders(authToken) }).catch(() => {}),
+                ])
+                window.location.reload()
+              } catch {}
+            }}>
               <Trash2 size={12} className="mr-1.5" /> Clear All Data
             </Button>
           </div>
@@ -1838,20 +1947,20 @@ export default function DashboardPage() {
         </ScrollArea>
 
         {/* User section */}
-        {session?.user && sidebarOpen && (
+        {firebaseUser && sidebarOpen && (
           <div className="px-3 pb-2">
             <div className="glass rounded-lg p-2.5 space-y-1.5">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center text-[10px] font-bold text-white">
-                  {(session.user.name || session.user.email || 'U')[0].toUpperCase()}
+                  {(firebaseUser.displayName || firebaseUser.email || 'U')[0].toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-medium text-zinc-300 truncate">{session.user.name || 'User'}</p>
-                  <p className="text-[9px] text-zinc-600 truncate">{session.user.email}</p>
+                  <p className="text-[11px] font-medium text-zinc-300 truncate">{firebaseUser.displayName || 'User'}</p>
+                  <p className="text-[9px] text-zinc-600 truncate">{firebaseUser.email}</p>
                 </div>
               </div>
               <button
-n                onClick={() => signOut({ callbackUrl: '/login' })}
+                onClick={() => firebaseSignOut()}
                 className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-800/30 transition-colors text-zinc-500 hover:text-red-400 text-[10px]"
               >
                 <LogOut size={12} />
@@ -1860,7 +1969,7 @@ n                onClick={() => signOut({ callbackUrl: '/login' })}
             </div>
           </div>
         )}
-        {!session?.user && sidebarOpen && (
+        {!firebaseUser && sidebarOpen && (
           <div className="px-3 pb-2">
             <button
               onClick={() => window.location.href = '/login'}

@@ -121,6 +121,45 @@ let activeSession = null;
 let debounceTimers = new Map(); // tabId -> timeoutId
 let workspaceContexts = new Map(); // domain -> { title, category, tabs: Set }
 
+// Persist critical state to survive service worker restarts (MV3)
+let _persistTimer = null;
+async function persistCriticalState() {
+  try {
+    await chrome.storage.local.set({
+      _activeSession: activeSession ? JSON.stringify(activeSession) : null,
+      _workspaceContexts: JSON.stringify(Array.from(workspaceContexts.entries())),
+      _lastPersist: Date.now(),
+    });
+  } catch (err) {
+    console.error('[Cortex] Failed to persist state:', err);
+  }
+}
+
+// Throttled persist — runs at most every 30 seconds
+function schedulePersist() {
+  if (_persistTimer) return;
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    persistCriticalState();
+  }, 30000);
+}
+
+// Restore critical state on startup
+async function restoreCriticalState() {
+  try {
+    const data = await chrome.storage.local.get(['_activeSession', '_workspaceContexts']);
+    if (data._activeSession) {
+      activeSession = JSON.parse(data._activeSession);
+    }
+    if (data._workspaceContexts) {
+      const entries = JSON.parse(data._workspaceContexts);
+      workspaceContexts = new Map(entries);
+    }
+  } catch (err) {
+    console.error('[Cortex] Failed to restore state:', err);
+  }
+}
+
 // ===== UTILITY FUNCTIONS =====
 
 function generateId() {
@@ -460,6 +499,7 @@ async function processTabActivity(tabId) {
           activeSession.domains = [...(activeSession.domains || []), domain];
         }
         await updateSession(activeSession);
+        schedulePersist(); // Persist in-memory state periodically
       }
     }
 
@@ -586,7 +626,7 @@ async function endInactiveSessions() {
 
 // ===== CONTENT EXTRACTOR =====
 
-async function tryExtractContent(tabId, metadata) {
+async function tryExtractContent(tabId, metadata, retries = 2) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, {
       type: 'EXTRACT_CONTENT',
@@ -597,8 +637,12 @@ async function tryExtractContent(tabId, metadata) {
       await processExtractedContent(response.content, metadata);
     }
   } catch (err) {
-    // Content script may not be loaded yet — that's okay
-    console.log(`[Cortex] Could not extract content from tab ${tabId}:`, err.message);
+    if (retries > 0) {
+      // Content script may not be loaded yet — retry after a delay
+      setTimeout(() => tryExtractContent(tabId, metadata, retries - 1), 2000);
+    } else {
+      console.log(`[Cortex] Could not extract content from tab ${tabId}:`, err.message);
+    }
   }
 }
 
@@ -670,7 +714,8 @@ async function processExtractedContent(content, metadata) {
     pageType,
     description: processedDescription,
     keywords: content.keywords || [],
-    textPreview: processedText.substring(0, 500),
+    textPreview: processedText.substring(0, 5000), // Store up to 5000 chars for better search
+    fullText: processedText, // Store full text up to 10000 chars
     textLength: processedText.length,
     visitCount: 1,
     firstVisited: getTimestamp(),
@@ -821,7 +866,8 @@ async function saveManualMemory(data) {
     domain: domain || null,
     pageType: url ? detectPageType(url) : 'note',
     description: processedContent.substring(0, 1000),
-    textPreview: processedContent.substring(0, 500),
+    textPreview: processedContent.substring(0, 5000), // Store up to 5000 chars for better search
+    fullText: processedContent, // Store full text up to 10000 chars
     textLength: processedContent.length,
     visitCount: 1,
     firstVisited: getTimestamp(),
@@ -1229,7 +1275,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           AUTH_STATE.isAuthenticated = false;
           AUTH_STATE.userId = null;
           AUTH_STATE.token = null;
-          await setStorage('authToken', null);
+          await chrome.storage.local.remove(['authToken', 'authServerUrl', 'isAuthenticated']);
           sendResponse({ success: true });
           break;
         }
@@ -1478,6 +1524,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
   // Auto-authenticate from stored token
   await restoreAuth();
+
+  // Restore critical in-memory state (MV3 service worker may restart)
+  await restoreCriticalState();
 });
 
 // Handle extension startup (browser restart)
@@ -1495,6 +1544,9 @@ chrome.runtime.onStartup.addListener(async () => {
 
   // Restore auth on startup
   await restoreAuth();
+
+  // Restore critical in-memory state
+  await restoreCriticalState();
 });
 
 // Open side panel when action icon is clicked (can be triggered by popup)
@@ -1510,30 +1562,31 @@ const AUTH_STATE = {
   isAuthenticated: false,
   userId: null,
   token: null,
-  serverUrl: 'http://localhost:3000',
+  serverUrl: 'https://cortex-ai-memory.web.app', // Will be overridden by stored setting
 };
 
-async function authenticate(email, password) {
+async function authenticate(serverUrl, email, password) {
   try {
-    const response = await fetch(`${AUTH_STATE.serverUrl}/api/auth/callback/credentials`, {
+    // Use Firebase custom token from the server
+    const response = await fetch(`${serverUrl}/api/auth/extension-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, redirect: false }),
     });
-
     if (!response.ok) {
-      return { success: false, error: `Authentication failed: ${response.status}` };
+      const err = await response.json();
+      throw new Error(err.error || 'Authentication failed');
     }
-
     const data = await response.json();
-    AUTH_STATE.isAuthenticated = true;
-    AUTH_STATE.userId = data.user?.id || email;
-    AUTH_STATE.token = data.token || data.sessionToken;
 
-    if (AUTH_STATE.token) {
-      await setStorage('authToken', AUTH_STATE.token);
-      await setStorage('authUserId', AUTH_STATE.userId);
-    }
+    AUTH_STATE.token = data.token;
+    AUTH_STATE.serverUrl = data.serverUrl || serverUrl;
+    AUTH_STATE.isAuthenticated = true;
+
+    await chrome.storage.local.set({
+      authToken: data.token,
+      authServerUrl: data.serverUrl || serverUrl,
+      isAuthenticated: true,
+    });
 
     // Register device after successful auth
     await registerDevice();
@@ -1542,10 +1595,10 @@ async function authenticate(email, password) {
     await syncData();
 
     console.log('[Cortex] Authenticated successfully');
-    return { success: true, userId: AUTH_STATE.userId };
-  } catch (err) {
-    console.error('[Cortex] Authentication error:', err);
-    return { success: false, error: err.message };
+    return { success: true };
+  } catch (error) {
+    console.error('[Cortex] Auth failed:', error);
+    return { success: false, error: error.message };
   }
 }
 
@@ -1561,10 +1614,16 @@ async function getAuthToken() {
 }
 
 async function restoreAuth() {
-  const token = await getAuthToken();
-  if (token) {
-    AUTH_STATE.isAuthenticated = true;
-    console.log('[Cortex] Auth restored from stored token');
+  try {
+    const data = await chrome.storage.local.get(['authToken', 'authServerUrl', 'isAuthenticated']);
+    if (data.authToken && data.isAuthenticated) {
+      AUTH_STATE.token = data.authToken;
+      AUTH_STATE.serverUrl = data.authServerUrl || AUTH_STATE.serverUrl;
+      AUTH_STATE.isAuthenticated = true;
+      console.log('[Cortex] Auth restored from stored token');
+    }
+  } catch (err) {
+    console.error('[Cortex] Failed to restore auth:', err);
   }
 }
 
@@ -1624,11 +1683,11 @@ async function syncData() {
     const sessions = (await getStorage(STORAGE_KEYS.SESSIONS)) || [];
     const timeline = (await getStorage(STORAGE_KEYS.TIMELINE)) || [];
 
-    // Collect local changes
+    // Collect local changes — sync ALL data, not just a subset
     const localChanges = {
-      memories: memories.slice(-50), // Last 50 memories
-      sessions: sessions.filter(s => s.status === 'ended').slice(-20),
-      timeline: timeline.slice(-100),
+      memories: memories, // Sync ALL memories
+      sessions: sessions.filter(s => s.status === 'ended'),
+      timeline: timeline, // Sync ALL timeline events
     };
 
     const response = await fetch(`${AUTH_STATE.serverUrl}/api/sync`, {

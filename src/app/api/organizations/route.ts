@@ -1,35 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 // GET /api/organizations — List organizations the user belongs to
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const memberships = await db.orgMember.findMany({
-      where: { userId: session.user.id },
-      include: {
-        organization: {
-          include: {
-            members: {
-              select: { id: true, userId: true, role: true, permissions: true, joinedAt: true },
-            },
-          },
-        },
-      },
-      orderBy: { joinedAt: "desc" },
-    });
+    const userId = user.uid;
 
-    const organizations = memberships.map((m) => ({
-      ...m.organization,
-      myRole: m.role,
-      myPermissions: m.permissions,
-      memberCount: m.organization.members.length,
-    }));
+    // Get user's org memberships
+    const membershipsSnap = await adminDb
+      .collection("orgMembers")
+      .where("userId", "==", userId)
+      .orderBy("joinedAt", "desc")
+      .get();
+
+    const organizations: Array<Record<string, any>> = [];
+
+    for (const memberDoc of membershipsSnap.docs) {
+      const membership = memberDoc.data();
+      const orgDoc = await adminDb.collection("organizations").doc(membership.organizationId).get();
+
+      if (!orgDoc.exists) continue;
+
+      const orgData = orgDoc.data();
+
+      // Get all members of this org
+      const orgMembersSnap = await adminDb
+        .collection("orgMembers")
+        .where("organizationId", "==", orgDoc.id)
+        .get();
+
+      organizations.push({
+        id: orgDoc.id,
+        ...orgData,
+        myRole: membership.role,
+        myPermissions: membership.permissions,
+        memberCount: orgMembersSnap.size,
+        members: orgMembersSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })),
+      });
+    }
 
     return NextResponse.json({ data: organizations });
   } catch (error) {
@@ -41,10 +59,12 @@ export async function GET(request: NextRequest) {
 // POST /api/organizations — Create a new organization
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const body = await request.json();
     const { name, slug, description, icon } = body;
@@ -64,28 +84,62 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existing = await db.organization.findUnique({ where: { slug } });
-    if (existing) {
+    // Check if slug already exists
+    const existingSnap = await adminDb
+      .collection("organizations")
+      .where("slug", "==", slug)
+      .limit(1)
+      .get();
+
+    if (!existingSnap.empty) {
       return NextResponse.json({ error: "An organization with this slug already exists" }, { status: 409 });
     }
 
-    const organization = await db.organization.create({
-      data: { name, slug, description: description || null, icon: icon || null },
+    const orgId = generateId();
+    const now = new Date().toISOString();
+
+    await adminDb.collection("organizations").doc(orgId).set({
+      name,
+      slug,
+      description: description || null,
+      icon: icon || null,
+      createdAt: now,
+      updatedAt: now,
     });
 
-    const member = await db.orgMember.create({
+    const memberId = generateId();
+    const serializedPermissions = JSON.stringify([
+      "memories:read_write", "agents:read_write", "members:read_write",
+      "settings:read_write", "vault:read_write", "audit:read",
+    ]);
+
+    await adminDb.collection("orgMembers").doc(memberId).set({
+      organizationId: orgId,
+      userId,
+      role: "owner",
+      permissions: serializedPermissions,
+      joinedAt: now,
+    });
+
+    return NextResponse.json({
       data: {
-        organizationId: organization.id,
-        userId: session.user.id,
-        role: "owner",
-        permissions: JSON.stringify([
-          "memories:read_write", "agents:read_write", "members:read_write",
-          "settings:read_write", "vault:read_write", "audit:read",
-        ]),
+        id: orgId,
+        name,
+        slug,
+        description: description || null,
+        icon: icon || null,
+        createdAt: now,
+        updatedAt: now,
+        membership: {
+          id: memberId,
+          organizationId: orgId,
+          userId,
+          role: "owner",
+          permissions: serializedPermissions,
+          joinedAt: now,
+        },
       },
-    });
-
-    return NextResponse.json({ data: { ...organization, membership: member } }, { status: 201 });
+    }, { status: 201 });
   } catch (error) {
     console.error("[POST /api/organizations] Error:", error);
     return NextResponse.json({ error: "Failed to create organization" }, { status: 500 });

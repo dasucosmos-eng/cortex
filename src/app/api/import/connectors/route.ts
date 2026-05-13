@@ -1,8 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
 
 // GET /api/import/connectors — List available import connectors
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const user = await verifyAuth(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const connectors = [
       {
         id: "github",

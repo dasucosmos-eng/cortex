@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // POST /api/memory-curation — Run memory curation
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const body = await request.json();
     const { action, options } = body;
@@ -19,28 +21,29 @@ export async function POST(request: NextRequest) {
     }
 
     const result: Record<string, unknown> = { action, processedAt: new Date().toISOString() };
-    const userId = session.user.id;
 
     switch (action) {
       case "detect_duplicates": {
-        const memories = await db.memory.findMany({
-          where: { userId },
-          select: { id: true, content: true, title: true, type: true },
-          orderBy: { createdAt: "desc" },
-          take: 500,
-        });
+        const memoriesSnap = await adminDb
+          .collection("memories")
+          .where("userId", "==", userId)
+          .orderBy("createdAt", "desc")
+          .limit(500)
+          .get();
+
+        const memories = memoriesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         const duplicates: Array<{ group: number; memoryIds: string[]; similarity: string; titles: string[] }> = [];
         let groupIndex = 0;
 
         for (let i = 0; i < memories.length; i++) {
-          const contentA = memories[i].content.substring(0, 100).toLowerCase();
-          const titleA = (memories[i].title || "").toLowerCase();
+          const contentA = (memories[i] as any).content.substring(0, 100).toLowerCase();
+          const titleA = ((memories[i] as any).title || "").toLowerCase();
           if (contentA.length < 10) continue;
 
           for (let j = i + 1; j < memories.length; j++) {
-            const contentB = memories[j].content.substring(0, 100).toLowerCase();
-            const titleB = (memories[j].title || "").toLowerCase();
+            const contentB = (memories[j] as any).content.substring(0, 100).toLowerCase();
+            const titleB = ((memories[j] as any).title || "").toLowerCase();
 
             if (
               contentA === contentB ||
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
               if (existingGroup) {
                 if (!existingGroup.memoryIds.includes(memories[j].id)) {
                   existingGroup.memoryIds.push(memories[j].id);
-                  existingGroup.titles.push(memories[j].title || "Untitled");
+                  existingGroup.titles.push((memories[j] as any).title || "Untitled");
                 }
               } else {
                 groupIndex++;
@@ -59,7 +62,7 @@ export async function POST(request: NextRequest) {
                   group: groupIndex,
                   memoryIds: [memories[i].id, memories[j].id],
                   similarity: "high",
-                  titles: [memories[i].title || "Untitled", memories[j].title || "Untitled"],
+                  titles: [(memories[i] as any).title || "Untitled", (memories[j] as any).title || "Untitled"],
                 });
               }
             }
@@ -75,17 +78,28 @@ export async function POST(request: NextRequest) {
         const thresholdDays = options?.thresholdDays || 90;
         const thresholdDate = new Date();
         thresholdDate.setDate(thresholdDate.getDate() - thresholdDays);
+        const thresholdMs = thresholdDate.getTime();
 
-        const oldMemories = await db.memory.findMany({
-          where: { userId, createdAt: { lt: thresholdDate }, isSensitive: false },
-          orderBy: { createdAt: "asc" },
-          take: options?.limit || 100,
-        });
+        const memoriesSnap = await adminDb
+          .collection("memories")
+          .where("userId", "==", userId)
+          .where("isSensitive", "==", false)
+          .orderBy("createdAt", "asc")
+          .limit(options?.limit || 100)
+          .get();
+
+        const oldMemories = memoriesSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((m: any) => new Date(m.createdAt).getTime() < thresholdMs);
 
         let compressedCount = 0;
         for (const mem of oldMemories) {
-          if (mem.content.length > 500) {
-            await db.memory.update({ where: { id: mem.id }, data: { summary: mem.summary || mem.content.substring(0, 200) + "..." } });
+          const m = mem as any;
+          if (m.content.length > 500) {
+            await adminDb.collection("memories").doc(mem.id).update({
+              summary: m.summary || m.content.substring(0, 200) + "...",
+              updatedAt: new Date().toISOString(),
+            });
             compressedCount++;
           }
         }
@@ -98,33 +112,42 @@ export async function POST(request: NextRequest) {
         const archiveThresholdDays = options?.thresholdDays || 180;
         const archiveThresholdDate = new Date();
         archiveThresholdDate.setDate(archiveThresholdDate.getDate() - archiveThresholdDays);
+        const thresholdMs = archiveThresholdDate.getTime();
 
         // Get user's memory IDs for ownership check
-        const userMemoryIds = await db.memory.findMany({
-          where: { userId },
-          select: { id: true },
-        });
-        const memoryIdList = userMemoryIds.map((m) => m.id);
+        const userMemoriesSnap = await adminDb
+          .collection("memories")
+          .where("userId", "==", userId)
+          .select("__name__")
+          .get();
+        const memoryIdSet = new Set(userMemoriesSnap.docs.map((d) => d.id));
 
-        // Archive hybrid memories linked to user's memories
-        const hybridMemories = await db.hybridMemory.findMany({
-          where: {
-            OR: [
-              ...(memoryIdList.length > 0 ? [{ memoryId: { in: memoryIdList } }] : []),
-              ...(memoryIdList.length === 0 ? [{ id: "never-match" }] : []),
-            ],
-            lastAccessed: { lt: archiveThresholdDate },
-            isArchived: false,
-          },
-          orderBy: { lastAccessed: "asc" },
-          take: options?.limit || 100,
-        });
+        // Fetch hybrid memories and filter by ownership + threshold
+        const hybridSnap = await adminDb
+          .collection("hybridMemories")
+          .orderBy("lastAccessed", "asc")
+          .limit(options?.limit || 100)
+          .get();
+
+        const hybridMemories = hybridSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((hm: any) =>
+            memoryIdSet.has(hm.memoryId) &&
+            !hm.isArchived &&
+            new Date(hm.lastAccessed).getTime() < thresholdMs
+          );
 
         let archivedCount = 0;
         if (hybridMemories.length > 0) {
-          const idsToArchive = hybridMemories.map((hm) => hm.id);
-          await db.hybridMemory.updateMany({ where: { id: { in: idsToArchive } }, data: { isArchived: true } });
-          archivedCount = idsToArchive.length;
+          const batch = adminDb.batch();
+          for (const hm of hybridMemories) {
+            batch.update(adminDb.collection("hybridMemories").doc(hm.id), {
+              isArchived: true,
+              updatedAt: new Date().toISOString(),
+            });
+            archivedCount++;
+          }
+          await batch.commit();
         }
         result.itemsScanned = hybridMemories.length;
         result.itemsArchived = archivedCount;
@@ -133,34 +156,26 @@ export async function POST(request: NextRequest) {
 
       case "rebuild_hierarchy": {
         // Get user's memory IDs for ownership filtering
-        const userMemoryIds = await db.memory.findMany({
-          where: { userId },
-          select: { id: true },
-        });
-        const memoryIdList = userMemoryIds.map((m) => m.id);
+        const userMemoriesSnap = await adminDb
+          .collection("memories")
+          .where("userId", "==", userId)
+          .select("__name__")
+          .get();
+        const memoryIdSet = new Set(userMemoriesSnap.docs.map((d) => d.id));
 
-        const relationWhere: Record<string, unknown> = {};
-        if (memoryIdList.length > 0) {
-          relationWhere.OR = [
-            { fromId: { in: memoryIdList } },
-            { toId: { in: memoryIdList } },
-          ];
-        } else {
-          relationWhere.id = "never-match";
-        }
+        // Fetch memory relations
+        const relationsSnap = await adminDb
+          .collection("memoryRelations")
+          .orderBy("createdAt", "desc")
+          .limit(500)
+          .get();
 
-        const memoryRelations = await db.memoryRelation.findMany({
-          where: relationWhere,
-          include: {
-            from: { select: { id: true, type: true, tags: true, projectId: true } },
-            to: { select: { id: true, type: true, tags: true, projectId: true } },
-          },
-          orderBy: { createdAt: "desc" },
-          take: 500,
-        });
+        const memoryRelations = relationsSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((rel: any) => memoryIdSet.has(rel.fromId) || memoryIdSet.has(rel.toId));
 
         const hierarchyStats = { totalRelations: memoryRelations.length, byType: {} as Record<string, number>, byStrength: { strong: 0, medium: 0, weak: 0 } };
-        for (const rel of memoryRelations) {
+        for (const rel of memoryRelations as any[]) {
           hierarchyStats.byType[rel.type] = (hierarchyStats.byType[rel.type] || 0) + 1;
           if (rel.strength >= 0.7) hierarchyStats.byStrength.strong++;
           else if (rel.strength >= 0.4) hierarchyStats.byStrength.medium++;

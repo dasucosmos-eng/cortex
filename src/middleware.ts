@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getToken } from 'next-auth/jwt'
 
 export default async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname
@@ -21,26 +20,23 @@ export default async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  try {
-    const token = await getToken({
-      req,
-      secret: process.env.NEXTAUTH_SECRET || 'cortex-super-secret-key-2024-change-in-production',
-      secureCookie: false,
-    })
+  // Check for Firebase token in localStorage (sent via cookie or header)
+  // For middleware, we check for a cookie
+  const token = req.cookies.get('cortex_token')?.value
 
-    const isLoggedIn = !!token
-    const isAuthPage = pathname === '/login' || pathname === '/signup'
+  const isAuthPage = pathname === '/login' || pathname === '/signup'
 
-    if (isLoggedIn && isAuthPage) {
+  if (token) {
+    // Has token — redirect away from auth pages
+    if (isAuthPage) {
       return NextResponse.redirect(new URL('/', req.url))
     }
+    return NextResponse.next()
+  }
 
-    if (!isLoggedIn && !isAuthPage) {
-      return NextResponse.redirect(new URL('/login', req.url))
-    }
-  } catch {
-    // If token check fails, let the request through
-    // Route-level auth will handle it
+  // No token
+  if (!isAuthPage) {
+    return NextResponse.redirect(new URL('/login', req.url))
   }
 
   return NextResponse.next()

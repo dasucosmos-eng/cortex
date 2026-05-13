@@ -1,44 +1,56 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // GET /api/context-capsule — Generate the current context capsule
 export async function GET() {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const request = new NextRequest("https://internal");
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = user.uid;
 
-    const userId = session.user.id;
+    // ── Get active session ──
+    const activeSessionSnapshot = await adminDb
+      .collection("sessions")
+      .where("userId", "==", userId)
+      .where("isActive", "==", true)
+      .limit(1)
+      .get();
 
-    // Get active session
-    const activeSession = await db.session.findFirst({
-      where: { isActive: true, userId },
+    let activeSession: Record<string, unknown> | null = null;
+    if (!activeSessionSnapshot.empty) {
+      const doc = activeSessionSnapshot.docs[0];
+      activeSession = { id: doc.id, ...doc.data() };
+    }
+
+    // ── Get recent memories (last 10, exclude sensitive) ──
+    const recentMemoriesSnapshot = await adminDb
+      .collection("memories")
+      .where("userId", "==", userId)
+      .where("isSensitive", "==", false)
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .get();
+
+    const recentMemories = recentMemoriesSnapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        type: data.type,
+        title: data.title || null,
+        summary: data.summary || null,
+        content: data.content || null,
+        url: data.url || null,
+        domain: data.domain || null,
+        projectId: data.projectId || null,
+        createdAt: data.createdAt,
+      };
     });
 
-    // Get recent memories (last 10, exclude sensitive)
-    const recentMemories = await db.memory.findMany({
-      where: {
-        userId,
-        isSensitive: false,
-      },
-      take: 10,
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        summary: true,
-        content: true,
-        url: true,
-        domain: true,
-        projectId: true,
-        createdAt: true,
-      },
-    });
-
-    // Get today's timeline events
+    // ── Get today's timeline events ──
     const today = new Date();
     const startOfDay = new Date(
       today.getFullYear(),
@@ -50,49 +62,79 @@ export async function GET() {
       today.getMonth(),
       today.getDate() + 1
     );
+    const startOfDayISO = startOfDay.toISOString();
+    const endOfDayISO = endOfDay.toISOString();
 
-    const todaysTimeline = await db.timelineEvent.findMany({
-      where: {
-        userId,
-        createdAt: { gte: startOfDay, lt: endOfDay },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        domain: true,
-        createdAt: true,
-      },
-    });
+    // Firestore doesn't support range queries on unordered fields without indexes,
+    // so we fetch recent timeline events and filter in JS
+    const timelineSnapshot = await adminDb
+      .collection("timeline")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .limit(100)
+      .get();
 
-    // Get project info for current session
-    let currentProject = null;
-    if (activeSession?.project) {
-      currentProject = await db.project.findFirst({
-        where: { name: activeSession.project, userId },
-      });
+    const todaysTimeline = timelineSnapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          type: data.type,
+          title: data.title,
+          domain: data.domain || null,
+          createdAt: data.createdAt,
+        };
+      })
+      .filter((event) => {
+        const created = event.createdAt as string;
+        return created >= startOfDayISO && created < endOfDayISO;
+      })
+      .slice(0, 20);
+
+    // ── Get project info for current session ──
+    let currentProject: Record<string, unknown> | null = null;
+    if (activeSession && activeSession.project) {
+      const projectSnapshot = await adminDb
+        .collection("projects")
+        .where("userId", "==", userId)
+        .where("name", "==", String(activeSession.project))
+        .limit(1)
+        .get();
+
+      if (!projectSnapshot.empty) {
+        const doc = projectSnapshot.docs[0];
+        const data = doc.data();
+        currentProject = {
+          id: doc.id,
+          name: data.name,
+          description: data.description || null,
+          color: data.color || "#6366f1",
+        };
+      }
     }
 
-    // Get session memory count for context
+    // ── Get session memory count for context ──
     let sessionMemoryCount = 0;
     if (activeSession) {
-      sessionMemoryCount = await db.memory.count({
-        where: { sessionId: activeSession.id, userId },
-      });
+      const sessionMemoriesSnapshot = await adminDb
+        .collection("memories")
+        .where("userId", "==", userId)
+        .where("sessionId", "==", String(activeSession.id))
+        .select("__name__")
+        .get();
+      sessionMemoryCount = sessionMemoriesSnapshot.size;
     }
 
-    // Format the context capsule
+    // ── Format the context capsule ──
     const contextCapsule = {
       timestamp: new Date().toISOString(),
       currentSession: activeSession
         ? {
             id: activeSession.id,
             title: activeSession.title,
-            task: activeSession.task,
-            intent: activeSession.intent,
-            project: activeSession.project,
+            task: activeSession.task || null,
+            intent: activeSession.intent || null,
+            project: activeSession.project || null,
             startedAt: activeSession.startedAt,
             memoryCount: sessionMemoryCount,
           }
@@ -109,7 +151,7 @@ export async function GET() {
         id: memory.id,
         type: memory.type,
         title: memory.title,
-        summary: memory.summary || memory.content.substring(0, 150),
+        summary: memory.summary || (memory.content ? memory.content.substring(0, 150) : ""),
         url: memory.url,
         domain: memory.domain,
         projectId: memory.projectId,
@@ -124,14 +166,17 @@ export async function GET() {
       })),
       summary: {
         activeSessionTitle: activeSession?.title || null,
-        projectName: currentProject?.name || activeSession?.project || null,
+        projectName:
+          (currentProject?.name as string) ||
+          (activeSession?.project as string) ||
+          null,
         recentMemoryCount: recentMemories.length,
         todayEventCount: todaysTimeline.length,
         hasSensitiveData: false,
       },
     };
 
-    // Generate a readable AI context string
+    // ── Generate a readable AI context string ──
     const readableContext = [
       "=== CURRENT CONTEXT CAPSULE ===",
       "",
@@ -152,7 +197,8 @@ export async function GET() {
       "",
       `Recent Memories (${contextCapsule.recentMemories.length}):`,
       ...contextCapsule.recentMemories.map(
-        (m) => `  - [${m.type}] ${m.title || "Untitled"}: ${m.summary.substring(0, 100)}`
+        (m) =>
+          `  - [${m.type}] ${m.title || "Untitled"}: ${m.summary.substring(0, 100)}`
       ),
       "",
       `Today's Timeline (${contextCapsule.todaysTimeline.length} events):`,

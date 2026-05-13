@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
 import { getOrchestrator } from "@/lib/ai/agent-orchestrator";
-import { auth } from "@/lib/auth";
 
 // GET /api/agents/[id] — Get specific execution details
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -40,12 +40,12 @@ export async function GET(
 
 // DELETE /api/agents/[id] — Cancel a running execution
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

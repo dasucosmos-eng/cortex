@@ -414,6 +414,99 @@
       color: var(--text-secondary);
     }
 
+    /* Settings panel */
+    .settings-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .settings-overlay.open {
+      display: flex;
+    }
+    .settings-panel {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      width: 300px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .settings-panel h3 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .settings-panel h3 svg {
+      color: var(--text-muted);
+    }
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .settings-row:last-of-type {
+      border-bottom: none;
+    }
+    .settings-label {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .settings-value {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-family: 'SF Mono', 'Menlo', monospace;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: right;
+    }
+    .settings-value.connected {
+      color: var(--accent);
+    }
+    .settings-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .settings-btn {
+      flex: 1;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .settings-btn:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
+    }
+    .settings-btn.danger:hover {
+      background: var(--danger-dim);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: var(--danger);
+    }
+    .settings-btn svg { width: 12px; height: 12px; }
+
     /* Content scroll area */
     .content-area {
       max-height: 340px;
@@ -532,6 +625,9 @@
         </div>
       </div>
       <div class="header-actions">
+        <button class="icon-btn" id="settingsBtn" title="Settings">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <div class="toggle-wrap">
           <div class="toggle active" id="trackingToggle" role="switch" aria-checked="true" tabindex="0"></div>
         </div>
@@ -633,6 +729,34 @@
   <!-- Footer -->
   <div class="footer">
     <div class="footer-text">Cortex — Your AI-powered second brain</div>
+  </div>
+
+  <!-- Settings Panel Overlay -->
+  <div class="settings-overlay" id="settingsOverlay">
+    <div class="settings-panel">
+      <h3>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </h3>
+      <div class="settings-row">
+        <span class="settings-label">Server</span>
+        <span class="settings-value" id="settingsServerUrl">—</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Status</span>
+        <span class="settings-value" id="settingsStatus">Not Connected</span>
+      </div>
+      <div class="settings-actions">
+        <button class="settings-btn" id="settingsOpenWebBtn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Open Settings
+        </button>
+        <button class="settings-btn danger" id="settingsDisconnectBtn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Disconnect
+        </button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

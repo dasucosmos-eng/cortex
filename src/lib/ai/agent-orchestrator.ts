@@ -7,7 +7,7 @@
 // ============================================================
 
 import ZAI from "z-ai-web-dev-sdk";
-import { db } from "@/lib/db";
+import { adminDb } from '@/lib/firebase'
 import { routeToModel } from "./agent-routers";
 
 // --------------- Type Definitions ---------------
@@ -313,14 +313,15 @@ export class AgentOrchestrator {
 
     // Gather relevant memories based on session, project, or memory ID
     if (task.context.sessionId) {
-      const sessionMemories = await db.memory.findMany({
-        where: { sessionId: task.context.sessionId },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      });
+      const sessionSnapshot = await adminDb.collection('memories')
+        .where('sessionId', '==', task.context.sessionId)
+        .orderBy('createdAt', 'desc')
+        .limit(20)
+        .get();
+      const sessionMemories = sessionSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       enriched.relevantMemories = [
         ...enriched.relevantMemories,
-        ...sessionMemories.map((m) => ({
+        ...sessionMemories.map((m: any) => ({
           id: m.id,
           type: m.type,
           content: m.content,
@@ -332,14 +333,9 @@ export class AgentOrchestrator {
     }
 
     if (task.context.memoryId) {
-      const memory = await db.memory.findUnique({
-        where: { id: task.context.memoryId },
-        include: {
-          relatedFrom: { include: { to: true } },
-          relatedTo: { include: { from: true } },
-        },
-      });
-      if (memory) {
+      const memoryDoc = await adminDb.collection('memories').doc(task.context.memoryId).get();
+      if (memoryDoc.exists) {
+        const memory = { id: memoryDoc.id, ...memoryDoc.data() } as any;
         // Add the target memory if not already included
         const alreadyIncluded = enriched.relevantMemories.some(
           (m) => m.id === memory.id
@@ -355,30 +351,42 @@ export class AgentOrchestrator {
           });
         }
         // Add related memories
+        const relSnapshot = await adminDb.collection('memoryRelations')
+          .where('fromId', '==', task.context.memoryId)
+          .get();
         const relatedIds = new Set<string>();
-        for (const rel of memory.relatedFrom) {
+        for (const doc of relSnapshot.docs) {
+          const rel = doc.data() as any;
           relatedIds.add(rel.toId);
         }
-        for (const rel of memory.relatedTo) {
+        const relToSnapshot = await adminDb.collection('memoryRelations')
+          .where('toId', '==', task.context.memoryId)
+          .get();
+        for (const doc of relToSnapshot.docs) {
+          const rel = doc.data() as any;
           relatedIds.add(rel.fromId);
         }
         if (relatedIds.size > 0) {
-          const relatedMemories = await db.memory.findMany({
-            where: { id: { in: Array.from(relatedIds) } },
-            take: 10,
-          });
+          // Firestore 'in' queries support up to 30 items
+          const ids = Array.from(relatedIds).slice(0, 30);
+          const relatedSnapshot = await adminDb.collection('memories')
+            .where('id', 'in', ids)
+            .limit(10)
+            .get();
+          const relatedMemories = relatedSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
           for (const rm of relatedMemories) {
+            const rmData = rm as any;
             const alreadyIncluded = enriched.relevantMemories.some(
               (m) => m.id === rm.id
             );
             if (!alreadyIncluded) {
               enriched.relevantMemories.push({
                 id: rm.id,
-                type: rm.type,
-                content: rm.content,
-                summary: rm.summary,
-                tags: rm.tags,
-                createdAt: rm.createdAt,
+                type: rmData.type,
+                content: rmData.content,
+                summary: rmData.summary,
+                tags: rmData.tags,
+                createdAt: rmData.createdAt,
               });
             }
           }
@@ -387,23 +395,25 @@ export class AgentOrchestrator {
     }
 
     if (task.context.projectId) {
-      const projectMemories = await db.memory.findMany({
-        where: { projectId: task.context.projectId },
-        orderBy: { createdAt: "desc" },
-        take: 15,
-      });
+      const projectSnapshot = await adminDb.collection('memories')
+        .where('projectId', '==', task.context.projectId)
+        .orderBy('createdAt', 'desc')
+        .limit(15)
+        .get();
+      const projectMemories = projectSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       for (const pm of projectMemories) {
+        const pmData = pm as any;
         const alreadyIncluded = enriched.relevantMemories.some(
           (m) => m.id === pm.id
         );
         if (!alreadyIncluded) {
           enriched.relevantMemories.push({
             id: pm.id,
-            type: pm.type,
-            content: pm.content,
-            summary: pm.summary,
-            tags: pm.tags,
-            createdAt: pm.createdAt,
+            type: pmData.type,
+            content: pmData.content,
+            summary: pmData.summary,
+            tags: pmData.tags,
+            createdAt: pmData.createdAt,
           });
         }
       }

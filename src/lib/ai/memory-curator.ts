@@ -6,7 +6,8 @@
 // and merge handling for imported memories.
 // ============================================================
 
-import { db } from "@/lib/db";
+import { adminDb } from '@/lib/firebase'
+import { generateId, serverTimestamp } from '@/lib/db'
 
 // --------------- Type Definitions ---------------
 
@@ -369,14 +370,11 @@ export async function archiveMemories(
       // Update the memory to mark as archived (using tags)
       try {
         const existingTags: string[] = memory.tags
-          ? JSON.parse(memory.tags)
+          ? (typeof memory.tags === 'string' ? JSON.parse(memory.tags) : Array.isArray(memory.tags) ? memory.tags : [])
           : [];
         if (!existingTags.includes("archived")) {
-          await db.memory.update({
-            where: { id: memory.id },
-            data: {
-              tags: JSON.stringify([...existingTags, "archived"]),
-            },
+          await adminDb.collection('memories').doc(memory.id).update({
+            tags: JSON.stringify([...existingTags, "archived"]),
           });
           archivedIds.push(memory.id);
         }
@@ -499,13 +497,10 @@ export async function mergeImportedMemory(
         : [];
       const mergedTags = [...new Set([...existingTags, ...importedTags, "merged"])];
 
-      await db.memory.update({
-        where: { id: existing.id },
-        data: {
-          content: mergedContent,
-          tags: JSON.stringify(mergedTags),
-          updatedAt: new Date(),
-        },
+      await adminDb.collection('memories').doc(existing.id).update({
+        content: mergedContent,
+        tags: JSON.stringify(mergedTags),
+        updatedAt: new Date(),
       });
 
       return { action: "merged", memoryId: existing.id, mergedWith: existing.id };
@@ -514,13 +509,12 @@ export async function mergeImportedMemory(
     if (similarity > 0.6) {
       // Somewhat similar — add as related
       try {
-        await db.memoryRelation.create({
-          data: {
-            fromId: existing.id,
-            toId: imported.id || "",
-            type: "related",
-            strength: similarity,
-          },
+        await adminDb.collection('memoryRelations').add({
+          fromId: existing.id,
+          toId: imported.id || "",
+          type: "related",
+          strength: similarity,
+          createdAt: serverTimestamp,
         });
       } catch {
         // Relation may already exist
@@ -529,20 +523,21 @@ export async function mergeImportedMemory(
   }
 
   // No duplicate found — create new memory
-  const created = await db.memory.create({
-    data: {
-      type: imported.type,
-      content: imported.content,
-      summary: imported.summary || null,
-      tags: imported.tags || null,
-      domain: imported.domain || null,
-      url: imported.url || null,
-      projectId: imported.projectId || null,
-      isSensitive: false,
-    },
+  const newId = generateId();
+  await adminDb.collection('memories').doc(newId).set({
+    type: imported.type,
+    content: imported.content,
+    summary: imported.summary || null,
+    tags: imported.tags || null,
+    domain: imported.domain || null,
+    url: imported.url || null,
+    projectId: imported.projectId || null,
+    isSensitive: false,
+    createdAt: serverTimestamp,
+    updatedAt: serverTimestamp,
   });
 
-  return { action: "created", memoryId: created.id };
+  return { action: "created", memoryId: newId };
 }
 
 /**

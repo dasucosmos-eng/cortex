@@ -6,7 +6,8 @@
 // and node ranking.
 // ============================================================
 
-import { db } from "@/lib/db";
+import { adminDb } from '@/lib/firebase'
+import { FieldPath, Query } from 'firebase-admin/firestore'
 
 // --------------- Type Definitions ---------------
 
@@ -157,77 +158,105 @@ export function extractEntities(text: string): Array<{ id: string; type: string;
  * Convert memories into a knowledge graph structure.
  */
 export async function buildGraphFromMemories(userId?: string): Promise<KnowledgeGraph> {
-  const where: Record<string, unknown> = { isSensitive: false };
-  if (userId) where.userId = userId;
-
-  const memories = await db.memory.findMany({
-    where,
-    include: {
-      relatedFrom: true,
-      relatedTo: true,
-    },
-    take: 200,
-    orderBy: { createdAt: "desc" },
-  });
-
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const nodeIds = new Set<string>();
 
+  let query: Query = adminDb.collection('memories').where('isSensitive', '==', false)
+  if (userId) {
+    query = adminDb.collection('memories').where('isSensitive', '==', false).where('userId', '==', userId)
+  }
+
+  const snapshot = await query.orderBy('createdAt', 'desc').limit(200).get()
+
+  const memories = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }))
+
+  // Fetch all memory relations
+  const relSnapshot = await adminDb.collection('memoryRelations').get()
+  const relations = relSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }))
+
+  // Group relations by fromId and toId for quick lookup
+  const relsFrom = new Map<string, typeof relations>()
+  const relsTo = new Map<string, typeof relations>()
+  for (const rel of relations) {
+    const fromId = (rel as any).fromId
+    const toId = (rel as any).toId
+    if (fromId) {
+      if (!relsFrom.has(fromId)) relsFrom.set(fromId, [])
+      relsFrom.get(fromId)!.push(rel)
+    }
+    if (toId) {
+      if (!relsTo.has(toId)) relsTo.set(toId, [])
+      relsTo.get(toId)!.push(rel)
+    }
+  }
+
   // Add memories as nodes
   for (const memory of memories) {
+    const data = memory as any
     if (!nodeIds.has(memory.id)) {
       nodes.push({
         id: memory.id,
-        type: memory.type,
-        label: (memory.title || memory.summary || memory.content).substring(0, 60),
+        type: data.type,
+        label: (data.title || data.summary || data.content || '').substring(0, 60),
         metadata: {
-          tags: memory.tags ? JSON.parse(memory.tags) : [],
-          domain: memory.domain,
-          projectId: memory.projectId,
-          createdAt: memory.createdAt,
+          tags: data.tags ? (typeof data.tags === 'string' ? JSON.parse(data.tags) : data.tags) : [],
+          domain: data.domain,
+          projectId: data.projectId,
+          createdAt: data.createdAt,
         },
       });
       nodeIds.add(memory.id);
     }
 
-    // Add memory relations as edges
-    for (const rel of memory.relatedFrom) {
-      if (!nodeIds.has(rel.toId)) {
-        nodeIds.add(rel.toId);
+    // Add memory relations (from) as edges
+    const fromRels = relsFrom.get(memory.id) || []
+    for (const rel of fromRels) {
+      const relData = rel as any
+      if (!nodeIds.has(relData.toId)) {
+        nodeIds.add(relData.toId);
         nodes.push({
-          id: rel.toId,
+          id: relData.toId,
           type: "memory",
-          label: `Memory: ${rel.toId.substring(0, 8)}`,
+          label: `Memory: ${relData.toId.substring(0, 8)}`,
         });
       }
       edges.push({
         fromId: memory.id,
-        toId: rel.toId,
-        type: rel.type,
-        strength: rel.strength,
+        toId: relData.toId,
+        type: relData.type || 'related',
+        strength: relData.strength ?? 0.5,
       });
     }
 
-    for (const rel of memory.relatedTo) {
-      if (!nodeIds.has(rel.fromId)) {
-        nodeIds.add(rel.fromId);
+    // Add memory relations (to) as edges
+    const toRels = relsTo.get(memory.id) || []
+    for (const rel of toRels) {
+      const relData = rel as any
+      if (!nodeIds.has(relData.fromId)) {
+        nodeIds.add(relData.fromId);
         nodes.push({
-          id: rel.fromId,
+          id: relData.fromId,
           type: "memory",
-          label: `Memory: ${rel.fromId.substring(0, 8)}`,
+          label: `Memory: ${relData.fromId.substring(0, 8)}`,
         });
       }
       edges.push({
-        fromId: rel.fromId,
+        fromId: relData.fromId,
         toId: memory.id,
-        type: rel.type,
-        strength: rel.strength,
+        type: relData.type || 'related',
+        strength: relData.strength ?? 0.5,
       });
     }
 
     // Extract and add entities as nodes
-    const entities = extractEntities(memory.content + " " + (memory.summary || ""));
+    const entities = extractEntities(data.content + " " + (data.summary || ""));
     for (const entity of entities) {
       if (!nodeIds.has(entity.id)) {
         nodes.push({

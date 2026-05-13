@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
 
 interface SensitiveMatch {
   type: string;
@@ -149,6 +150,11 @@ function detectHighEntropyStrings(
 // POST /api/security/detect — Detect sensitive data patterns in content
 export async function POST(request: NextRequest) {
   try {
+    const user = await verifyAuth(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { content } = body;
 

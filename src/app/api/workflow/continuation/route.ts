@@ -5,17 +5,17 @@ import {
   createWorkflowSnapshot,
   detectInterruption,
 } from "@/lib/ai/workflow-continuation";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
 
 // GET /api/workflow/continuation — Get continuation suggestions
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
 
     const interrupted = await detectInterruption(userId);
 
@@ -65,8 +65,8 @@ export async function GET() {
 // POST /api/workflow/continuation — Resume a workflow
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

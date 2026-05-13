@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 import { getOrchestrator } from "@/lib/ai/agent-orchestrator";
-import { auth } from "@/lib/auth";
 import type { AgentType } from "@/lib/ai/agent-orchestrator";
 
 // GET /api/agents — List available agents with configs and recent stats
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -36,10 +37,12 @@ export async function GET() {
 // POST /api/agents — Execute an agent task
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const body = await request.json();
     const { agentType, input, context, priority } = body;
@@ -67,18 +70,19 @@ export async function POST(request: NextRequest) {
 
     const result = await orchestrator.execute(task);
 
-    // Log execution
-    await db.agentExecution.create({
-      data: {
-        agentType: agentType as AgentType,
-        status: result.status,
-        input: JSON.stringify(input),
-        output: JSON.stringify(result.output),
-        contextSize: result.tokensUsed || 0,
-        duration: result.duration || 0,
-        model: config.model,
-        userId: session.user.id,
-      },
+    // Log execution to Firestore
+    const executionId = generateId();
+    await adminDb.collection("agentExecutions").doc(executionId).set({
+      agentType: agentType as AgentType,
+      status: result.status,
+      input: JSON.stringify(input),
+      output: JSON.stringify(result.output),
+      contextSize: result.tokensUsed || 0,
+      duration: result.duration || 0,
+      model: config.model,
+      userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
 
     return NextResponse.json({

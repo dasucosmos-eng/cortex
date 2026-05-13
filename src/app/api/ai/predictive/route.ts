@@ -1,54 +1,68 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // GET /api/ai/predictive — Get AI predictions and suggestions
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
 
     const [
-      recentMemories,
-      recentSessions,
-      knowledgeNodes,
-      agentExecutions,
-      timelineEvents,
+      recentMemoriesSnap,
+      recentSessionsSnap,
+      knowledgeNodesSnap,
+      agentExecutionsSnap,
+      timelineEventsSnap,
     ] = await Promise.all([
-      db.memory.findMany({
-        where: { userId, isSensitive: false },
-        orderBy: { createdAt: "desc" }, take: 50,
-        select: { id: true, type: true, title: true, content: true, tags: true, projectId: true, createdAt: true },
-      }),
-      db.session.findMany({
-        where: { userId, isActive: false },
-        orderBy: { endedAt: "desc" }, take: 20,
-        select: { id: true, title: true, project: true, task: true, intent: true, summary: true, startedAt: true, endedAt: true },
-      }),
-      db.knowledgeNode.findMany({
-        where: { userId },
-        orderBy: { importance: "desc" }, take: 30,
-        select: { id: true, type: true, label: true, importance: true, metadata: true },
-      }),
-      db.agentExecution.findMany({
-        where: { userId, status: "failed" },
-        orderBy: { createdAt: "desc" }, take: 10,
-        select: { id: true, agentType: true, error: true, input: true, createdAt: true },
-      }),
-      db.timelineEvent.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" }, take: 30,
-        select: { id: true, type: true, title: true, domain: true, createdAt: true },
-      }),
+      adminDb
+        .collection("memories")
+        .where("userId", "==", userId)
+        .where("isSensitive", "==", false)
+        .orderBy("createdAt", "desc")
+        .limit(50)
+        .get(),
+      adminDb
+        .collection("sessions")
+        .where("userId", "==", userId)
+        .where("isActive", "==", false)
+        .orderBy("endedAt", "desc")
+        .limit(20)
+        .get(),
+      adminDb
+        .collection("knowledgeNodes")
+        .where("userId", "==", userId)
+        .orderBy("importance", "desc")
+        .limit(30)
+        .get(),
+      adminDb
+        .collection("agentExecutions")
+        .where("userId", "==", userId)
+        .where("status", "==", "failed")
+        .orderBy("createdAt", "desc")
+        .limit(10)
+        .get(),
+      adminDb
+        .collection("timeline")
+        .where("userId", "==", userId)
+        .orderBy("createdAt", "desc")
+        .limit(30)
+        .get(),
     ]);
+
+    const recentMemories = recentMemoriesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const recentSessions = recentSessionsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const knowledgeNodes = knowledgeNodesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const agentExecutions = agentExecutionsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const timelineEvents = timelineEventsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     // Suggested docs based on recent topics
     const topicCounts = new Map<string, number>();
-    for (const mem of recentMemories) {
+    for (const mem of recentMemories as Array<Record<string, any>>) {
       const topics: string[] = [];
       try { topics.push(...(mem.tags ? JSON.parse(mem.tags) : [])); } catch { }
       if (mem.type === "research" && mem.title) topics.push(mem.title);
@@ -61,20 +75,20 @@ export async function GET() {
 
     // Unfinished work
     const unfinishedWork = recentSessions
-      .filter((s) => {
+      .filter((s: any) => {
         if (!s.endedAt || !s.startedAt) return false;
         const duration = new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime();
         return duration < 5 * 60 * 1000 && s.task;
       })
       .slice(0, 5)
-      .map((s) => ({
+      .map((s: any) => ({
         sessionId: s.id, title: s.title, task: s.task, project: s.project, intent: s.intent,
         suggestion: `Resume work on "${s.task || s.title}" from project "${s.project || "unknown"}"`,
       }));
 
     // Error patterns
     const errorPatterns = new Map<string, number>();
-    for (const exec of agentExecutions) {
+    for (const exec of agentExecutions as Array<Record<string, any>>) {
       if (exec.error) {
         const errorSnippet = exec.error.substring(0, 100);
         errorPatterns.set(errorSnippet, (errorPatterns.get(errorSnippet) || 0) + 1);
@@ -85,13 +99,13 @@ export async function GET() {
       .filter(([, count]) => count > 1)
       .map(([error, count]) => ({ error, occurrences: count, suggestion: `This error has occurred ${count} times recently.` }));
 
-    const preloadedReferences = knowledgeNodes.slice(0, 10).map((node) => ({
+    const preloadedReferences = knowledgeNodes.slice(0, 10).map((node: any) => ({
       id: node.id, type: node.type, label: node.label, importance: node.importance,
       reason: `High-importance ${node.type} node frequently referenced in your knowledge graph`,
     }));
 
     const domainCounts = new Map<string, number>();
-    for (const event of timelineEvents) {
+    for (const event of timelineEvents as Array<Record<string, any>>) {
       if (event.domain) domainCounts.set(event.domain, (domainCounts.get(event.domain) || 0) + 1);
     }
 

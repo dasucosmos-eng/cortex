@@ -1,33 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // GET /api/analytics/daily-summary — Get daily summaries with rich analytics and trends
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
 
-    const where: Record<string, unknown> = { userId: session.user.id };
+    // Fetch all daily summaries for the user and filter in JS
+    const snapshot = await adminDb
+      .collection("aiDailySummaries")
+      .where("userId", "==", userId)
+      .orderBy("date", "desc")
+      .get();
 
-    if (startDate || endDate) {
-      where.date = {};
-      if (startDate) (where.date as Record<string, unknown>).gte = startDate;
-      if (endDate) (where.date as Record<string, unknown>).lte = endDate;
+    let summaries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    // Apply date range filter
+    if (startDate) {
+      summaries = summaries.filter((s: any) => s.date >= startDate);
+    }
+    if (endDate) {
+      summaries = summaries.filter((s: any) => s.date <= endDate);
     }
 
-    const summaries = await db.aIDailySummary.findMany({
-      where,
-      orderBy: { date: "desc" },
-    });
-
-    const enrichedSummaries = summaries.map((summary) => {
+    const enrichedSummaries = summaries.map((summary: any) => {
       let topics: string[] = [];
       let projects: Array<Record<string, unknown>> = [];
       let stats: Record<string, unknown> = {};
@@ -39,6 +45,7 @@ export async function GET(request: NextRequest) {
       return { ...summary, topics, projects, stats };
     });
 
+    // Calculate weekly trends
     const now = new Date();
     const currentWeekStart = new Date(now);
     currentWeekStart.setDate(now.getDate() - now.getDay());
@@ -52,20 +59,15 @@ export async function GET(request: NextRequest) {
     const previousWeekEnd = new Date(previousWeekStart);
     previousWeekEnd.setDate(previousWeekEnd.getDate() + 6);
 
-    const [currentWeekSummaries, previousWeekSummaries] = await Promise.all([
-      db.aIDailySummary.findMany({ where: { userId: session.user.id, date: { gte: currentWeekStartStr, lte: currentWeekEndStr } } }),
-      db.aIDailySummary.findMany({ where: { userId: session.user.id, date: { gte: previousWeekStartStr, lte: previousWeekEnd.toISOString().split("T")[0] } } }),
-    ]);
-
-    function aggregateWeekStats(weekSummaries: typeof currentWeekSummaries) {
+    function aggregateWeekStats(weekSummaries: any[]) {
       let totalSessions = 0, totalMemories = 0, totalDecisions = 0;
       const allTopics: string[] = [];
       const allProjects: Set<string> = new Set();
 
       for (const s of weekSummaries) {
-        try { const st = s.stats ? JSON.parse(s.stats) : {}; totalSessions += st.sessionsCreated || 0; totalMemories += st.memoriesCreated || 0; totalDecisions += st.decisionsMade || 0; } catch { }
-        try { const t = s.topics ? JSON.parse(s.topics) : []; allTopics.push(...t); } catch { }
-        try { const p = s.projects ? JSON.parse(s.projects) : []; for (const pr of p) { if (pr.name) allProjects.add(String(pr.name)); } } catch { }
+        try { const st = s.stats ? (typeof s.stats === "string" ? JSON.parse(s.stats) : s.stats) : {}; totalSessions += st.sessionsCreated || 0; totalMemories += st.memoriesCreated || 0; totalDecisions += st.decisionsMade || 0; } catch { }
+        try { const t = s.topics ? (typeof s.topics === "string" ? JSON.parse(s.topics) : s.topics) : []; allTopics.push(...t); } catch { }
+        try { const p = s.projects ? (typeof s.projects === "string" ? JSON.parse(s.projects) : s.projects) : []; for (const pr of p) { if (pr.name) allProjects.add(String(pr.name)); } } catch { }
       }
 
       const topicCounts = new Map<string, number>();
@@ -79,6 +81,12 @@ export async function GET(request: NextRequest) {
       };
     }
 
+    // Filter summaries by week ranges for trend calculation
+    const previousWeekEndStr = previousWeekEnd.toISOString().split("T")[0];
+
+    const currentWeekSummaries = summaries.filter((s: any) => s.date >= currentWeekStartStr && s.date <= currentWeekEndStr);
+    const previousWeekSummaries = summaries.filter((s: any) => s.date >= previousWeekStartStr && s.date <= previousWeekEndStr);
+
     const currentStats = aggregateWeekStats(currentWeekSummaries);
     const previousStats = aggregateWeekStats(previousWeekSummaries);
 
@@ -89,7 +97,7 @@ export async function GET(request: NextRequest) {
 
     const trends = {
       currentWeek: { startDate: currentWeekStartStr, endDate: currentWeekEndStr, ...currentStats },
-      previousWeek: { startDate: previousWeekStartStr, endDate: previousWeekEnd.toISOString().split("T")[0], ...previousStats },
+      previousWeek: { startDate: previousWeekStartStr, endDate: previousWeekEndStr, ...previousStats },
       changes: {
         sessions: computeChange(currentStats.totalSessions, previousStats.totalSessions),
         memories: computeChange(currentStats.totalMemories, previousStats.totalMemories),

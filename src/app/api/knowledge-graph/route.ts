@@ -1,20 +1,20 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   buildGraphFromMemories,
   getCachedGraph,
   invalidateGraphCache,
 } from "@/lib/ai/knowledge-engine";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
 
 // GET /api/knowledge-graph — Get full knowledge graph
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
     let graph = getCachedGraph();
 
     if (!graph) {
@@ -36,14 +36,14 @@ export async function GET() {
 }
 
 // POST /api/knowledge-graph — Trigger graph rebuild from memories
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
     invalidateGraphCache();
     const graph = await buildGraphFromMemories(userId);
 

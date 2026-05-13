@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 // GET /api/timeline — List timeline events with filters and pagination
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = user.uid;
 
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
@@ -21,41 +23,72 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get("startDate") || undefined;
     const endDate = searchParams.get("endDate") || undefined;
 
-    const where: Record<string, unknown> = { userId: session.user.id };
+    // Build Firestore query — always filter by userId
+    let query: FirebaseFirestore.Query = adminDb
+      .collection("timeline")
+      .where("userId", "==", userId);
 
+    // Firestore requires composite indexes for inequality filters combined with ordering
+    // We'll apply date range filters server-side to avoid index issues
+
+    // Apply equality filters that are safe with the query
     if (sessionId) {
-      where.sessionId = sessionId;
+      query = query.where("sessionId", "==", sessionId);
     }
     if (type) {
-      where.type = type;
-    }
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) {
-        (where.createdAt as Record<string, unknown>).gte = new Date(startDate);
-      }
-      if (endDate) {
-        (where.createdAt as Record<string, unknown>).lte = new Date(endDate);
-      }
+      query = query.where("type", "==", type);
     }
 
-    const [events, total] = await Promise.all([
-      db.timelineEvent.findMany({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-        include: {
-          session: {
-            select: { id: true, title: true },
-          },
-        },
-      }),
-      db.timelineEvent.count({ where }),
-    ]);
+    // Order by createdAt desc
+    query = query.orderBy("createdAt", "desc");
+
+    // Fetch a reasonable set and filter dates in JS (avoids composite index requirements)
+    const fetchLimit = Math.min(500, Math.max(100, (page + 1) * limit));
+    const snapshot = await query.limit(fetchLimit).get();
+
+    let events: Array<Record<string, any>> = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...(doc.data() as Record<string, any>),
+    }));
+
+    // Apply date range filters in JS
+    if (startDate || endDate) {
+      events = events.filter((event) => {
+        const created = event.createdAt as string;
+        if (startDate && created < startDate) return false;
+        if (endDate && created > endDate) return false;
+        return true;
+      });
+    }
+
+    const total = events.length;
+
+    // Paginate
+    const start = (page - 1) * limit;
+    const paginatedEvents = events.slice(start, start + limit);
+
+    // Enrich with session info for events that have a sessionId
+    const enrichedEvents: Array<Record<string, any>> = await Promise.all(
+      paginatedEvents.map(async (event) => {
+        let session: Record<string, any> | null = null;
+        if (event.sessionId) {
+          const sessionDoc = await adminDb
+            .collection("sessions")
+            .doc(String(event.sessionId))
+            .get();
+          if (sessionDoc.exists) {
+            session = {
+              id: sessionDoc.id,
+              title: sessionDoc.get("title"),
+            };
+          }
+        }
+        return { ...event, session };
+      })
+    );
 
     return NextResponse.json({
-      data: events,
+      data: enrichedEvents,
       pagination: {
         page,
         limit,
@@ -75,10 +108,11 @@ export async function GET(request: NextRequest) {
 // POST /api/timeline — Create a timeline event
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userId = user.uid;
 
     const body = await request.json();
     const { type, title, url, domain, sessionId, metadata } = body;
@@ -116,30 +150,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Serialize metadata
     let serializedMetadata: string | undefined;
     if (metadata) {
       serializedMetadata =
         typeof metadata === "string" ? metadata : JSON.stringify(metadata);
     }
 
-    const event = await db.timelineEvent.create({
-      data: {
-        type: type.trim(),
-        title: title.trim(),
-        url: url || null,
-        domain: domain || null,
-        sessionId: sessionId || null,
-        metadata: serializedMetadata || null,
-        userId: session.user.id,
-      },
-      include: {
-        session: {
-          select: { id: true, title: true },
-        },
-      },
-    });
+    const now = new Date().toISOString();
+    const eventId = generateId();
 
-    return NextResponse.json({ data: event }, { status: 201 });
+    const eventDoc = {
+      userId,
+      type: type.trim(),
+      title: title.trim(),
+      url: url || null,
+      domain: domain || null,
+      sessionId: sessionId || null,
+      metadata: serializedMetadata || null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await adminDb.collection("timeline").doc(eventId).set(eventDoc);
+
+    // Enrich with session info if sessionId provided
+    let session: Record<string, unknown> | null = null;
+    if (sessionId) {
+      const sessionDoc = await adminDb
+        .collection("sessions")
+        .doc(sessionId)
+        .get();
+      if (sessionDoc.exists) {
+        session = {
+          id: sessionDoc.id,
+          title: sessionDoc.get("title"),
+        };
+      }
+    }
+
+    return NextResponse.json(
+      { data: { id: eventId, ...eventDoc, session } },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("[POST /api/timeline] Error:", error);
     return NextResponse.json(

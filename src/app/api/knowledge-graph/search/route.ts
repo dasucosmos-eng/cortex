@@ -4,17 +4,17 @@ import {
   getCachedGraph,
   buildGraphFromMemories,
 } from "@/lib/ai/knowledge-engine";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
 
 // GET /api/knowledge-graph/search — Search the knowledge graph
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
 
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q");

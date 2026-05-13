@@ -1,36 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
-import bcrypt from 'bcryptjs'
+import { adminDb } from '@/lib/firebase'
+import { generateId, serverTimestamp } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, email, password } = await request.json()
+    const { name, email } = await request.json()
 
     // Validate
-    if (!name || !email || !password) {
-      return NextResponse.json({ error: 'All fields required' }, { status: 400 })
+    if (!name || !email) {
+      return NextResponse.json({ error: 'Name and email required' }, { status: 400 })
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: 'Invalid email' }, { status: 400 })
     }
-    if (password.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
-    }
 
-    // Check existing
-    const existing = await db.user.findUnique({ where: { email } })
-    if (existing) {
+    // Check existing user in Firestore
+    const existingSnapshot = await adminDb.collection('users')
+      .where('email', '==', email)
+      .limit(1)
+      .get()
+
+    if (!existingSnapshot.empty) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 })
     }
 
-    // Create user
-    const hashedPassword = await bcrypt.hash(password, 12)
-    const user = await db.user.create({
-      data: { name, email, password: hashedPassword },
+    // Create user record in Firestore
+    const userId = generateId()
+    await adminDb.collection('users').doc(userId).set({
+      name,
+      email,
+      role: 'user',
+      createdAt: serverTimestamp,
+      updatedAt: serverTimestamp,
     })
 
     return NextResponse.json(
-      { data: { id: user.id, name: user.name, email: user.email } },
+      { data: { id: userId, name, email } },
       { status: 201 },
     )
   } catch (error) {

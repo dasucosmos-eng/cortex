@@ -30,6 +30,13 @@
     agentsBadge: document.getElementById('agentsBadge'),
     agentsRunningCount: document.getElementById('agentsRunningCount'),
     syncNowBtn: document.getElementById('syncNowBtn'),
+    // Settings panel
+    settingsBtn: document.getElementById('settingsBtn'),
+    settingsOverlay: document.getElementById('settingsOverlay'),
+    settingsServerUrl: document.getElementById('settingsServerUrl'),
+    settingsStatus: document.getElementById('settingsStatus'),
+    settingsOpenWebBtn: document.getElementById('settingsOpenWebBtn'),
+    settingsDisconnectBtn: document.getElementById('settingsDisconnectBtn'),
   };
 
   let state = {
@@ -105,12 +112,52 @@
     await loadMemories();
   }
 
-  // ===== AUTH & SYNC =====
+  // ===== SETTINGS PANEL =====
+
+  let authData = null; // Store auth data for settings panel
+
+  function openSettings() {
+    if (authData) {
+      els.settingsServerUrl.textContent = authData.serverUrl || '—';
+      els.settingsStatus.textContent = authData.isAuthenticated ? 'Connected' : 'Not Connected';
+      els.settingsStatus.className = 'settings-value' + (authData.isAuthenticated ? ' connected' : '');
+    }
+    els.settingsOverlay.classList.add('open');
+  }
+
+  function closeSettings() {
+    els.settingsOverlay.classList.remove('open');
+  }
+
+  async function handleDisconnect() {
+    if (!confirm('Disconnect from Cortex cloud? Your local data will be preserved.')) return;
+
+    const response = await sendMessage('LOGOUT');
+    if (response.success) {
+      authData = { isAuthenticated: false, serverUrl: '—' };
+      els.settingsStatus.textContent = 'Not Connected';
+      els.settingsStatus.className = 'settings-value';
+      els.authDot.className = 'indicator-dot offline';
+      els.authStatusText.textContent = 'Offline';
+      els.syncDot.className = 'indicator-dot offline';
+      els.syncStatusText.textContent = 'Not synced';
+      closeSettings();
+    }
+  }
+
+  function openWebSettings() {
+    const url = authData?.serverUrl
+      ? `${authData.serverUrl}/settings`
+      : 'https://cortex-ai-memory.web.app/settings';
+    chrome.tabs.create({ url });
+    window.close();
+  }
 
   async function loadAuthAndSync() {
     // Auth status
     const authResponse = await sendMessage('GET_AUTH_STATUS');
     if (authResponse.success) {
+      authData = authResponse.data;
       const { isAuthenticated } = authResponse.data;
       if (isAuthenticated) {
         els.authDot.className = 'indicator-dot online';
@@ -410,6 +457,14 @@
   els.openDashboardBtn.addEventListener('click', openDashboard);
   els.clearDataBtn.addEventListener('click', clearData);
   if (els.syncNowBtn) els.syncNowBtn.addEventListener('click', handleSyncNow);
+
+  // Settings panel
+  if (els.settingsBtn) els.settingsBtn.addEventListener('click', openSettings);
+  if (els.settingsOverlay) els.settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === els.settingsOverlay) closeSettings();
+  });
+  if (els.settingsDisconnectBtn) els.settingsDisconnectBtn.addEventListener('click', handleDisconnect);
+  if (els.settingsOpenWebBtn) els.settingsOpenWebBtn.addEventListener('click', openWebSettings);
 
   // ===== INIT =====
   loadStatus();

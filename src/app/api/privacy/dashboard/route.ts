@@ -1,54 +1,72 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // GET /api/privacy/dashboard — Privacy transparency dashboard data
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
 
+    // Firestore doesn't support count queries natively — we fetch all and count in JS
     const [
-      totalMemories,
-      sensitiveMemories,
-      memoriesByType,
-      recentAgentExecutions,
-      vaultItemCount,
-      recentImports,
+      memoriesSnap,
+      agentExecutionsSnap,
+      vaultSnap,
+      importsSnap,
     ] = await Promise.all([
-      db.memory.count({ where: { userId } }),
-      db.memory.count({ where: { userId, isSensitive: true } }),
-      db.memory.groupBy({ by: ["type"], where: { userId }, _count: { type: true } }),
-      db.agentExecution.findMany({
-        where: { userId, status: { in: ["completed", "failed"] } },
-        orderBy: { createdAt: "desc" }, take: 20,
-        select: { id: true, agentType: true, status: true, model: true, createdAt: true, duration: true, contextSize: true },
-      }),
-      db.vaultItem.count({ where: { userId } }),
-      db.memoryImport.findMany({
-        where: { userId },
-        select: { id: true, source: true, status: true, itemsImported: true, lastSyncAt: true },
-      }),
+      adminDb
+        .collection("memories")
+        .where("userId", "==", userId)
+        .get(),
+      adminDb
+        .collection("agentExecutions")
+        .where("userId", "==", userId)
+        .orderBy("createdAt", "desc")
+        .limit(20)
+        .get(),
+      adminDb
+        .collection("vault")
+        .where("userId", "==", userId)
+        .get(),
+      adminDb
+        .collection("memoryImports")
+        .where("userId", "==", userId)
+        .get(),
     ]);
 
-    const allMemories = await db.memory.findMany({
-      where: { userId },
-      select: { content: true, embedding: true, metadata: true, createdAt: true, type: true },
-    });
+    const allMemories = memoriesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const agentExecutions = agentExecutionsSnap.docs.map((d) => d.data());
+    const vaultItems = vaultSnap.docs.map((d) => d.data());
+    const imports = importsSnap.docs.map((d) => d.data());
 
+    const totalMemories = allMemories.length;
+    const sensitiveMemories = allMemories.filter((m: any) => m.isSensitive === true).length;
+    const vaultItemCount = vaultItems.length;
+
+    // Group memories by type
+    const memoriesByType: Record<string, number> = {};
+    for (const mem of allMemories) {
+      const type = (mem as any).type || "unknown";
+      memoriesByType[type] = (memoriesByType[type] || 0) + 1;
+    }
+    const formattedByType = Object.entries(memoriesByType).map(([type, count]) => ({ type, count }));
+
+    // Compute storage estimates
     let totalChars = 0;
     let totalEmbeddingBytes = 0;
     const ageBuckets: Record<string, number> = { "today": 0, "this_week": 0, "this_month": 0, "3_months": 0, "6_months": 0, "older": 0 };
     const now = new Date();
 
     for (const mem of allMemories) {
-      totalChars += mem.content.length;
-      totalEmbeddingBytes += mem.embedding ? mem.embedding.length : 0;
-      const ageMs = now.getTime() - new Date(mem.createdAt).getTime();
+      const m = mem as any;
+      totalChars += (m.content || "").length;
+      totalEmbeddingBytes += m.embedding ? (m.embedding as string).length : 0;
+      const ageMs = now.getTime() - new Date(m.createdAt).getTime();
       const ageDays = ageMs / (1000 * 60 * 60 * 24);
       if (ageDays < 1) ageBuckets["today"]++;
       else if (ageDays < 7) ageBuckets["this_week"]++;
@@ -64,8 +82,12 @@ export async function GET() {
       totalEstimateMB: Math.round(((totalChars * 2 + totalEmbeddingBytes) / (1024 * 1024)) * 100) / 100,
     };
 
-    const formattedByType = memoriesByType.map((entry) => ({ type: entry.type, count: entry._count.type }));
-    const aiAccessLog = recentAgentExecutions.map((exec) => ({
+    // Filter agent executions by status
+    const recentAgentExecutions = agentExecutions.filter((e: any) =>
+      e.status === "completed" || e.status === "failed"
+    );
+
+    const aiAccessLog = recentAgentExecutions.map((exec: any) => ({
       id: exec.id, agent: exec.agentType, status: exec.status, model: exec.model || "default",
       timestamp: exec.createdAt, durationMs: exec.duration, tokensUsed: exec.contextSize,
     }));
@@ -78,8 +100,8 @@ export async function GET() {
         aiAccessLog,
         storage: storageEstimate,
         memoryAgeDistribution: ageBuckets,
-        externalSources: recentImports.map((imp) => ({
-          source: imp.source, status: imp.status, itemsImported: imp.itemsImported, lastSyncAt: imp.lastSyncAt,
+        externalSources: imports.map((imp: any) => ({
+          source: imp.source, status: imp.status, itemsImported: imp.itemsImported || 0, lastSyncAt: imp.lastSyncAt,
         })),
       },
     });

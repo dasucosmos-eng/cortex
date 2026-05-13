@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 
 // GET /api/audit-log — List audit logs
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const { searchParams } = new URL(request.url);
     const action = searchParams.get("action");
@@ -18,38 +20,65 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
     const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
 
-    const where: Record<string, unknown> = { userId: session.user.id };
+    // Build base query — always filter by userId
+    let query = adminDb
+      .collection("auditLog")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc");
 
-    if (action) where.action = action;
-    if (organizationId) where.organizationId = organizationId;
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) (where.createdAt as Record<string, unknown>).gte = new Date(startDate);
-      if (endDate) (where.createdAt as Record<string, unknown>).lte = new Date(endDate);
+    if (action) {
+      query = query.where("action", "==", action);
+    }
+    if (organizationId) {
+      query = query.where("organizationId", "==", organizationId);
     }
 
-    const [auditLogs, total] = await Promise.all([
-      db.auditLog.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: offset,
-        take: limit,
-        include: { organization: { select: { id: true, name: true, slug: true } } },
-      }),
-      db.auditLog.count({ where }),
-    ]);
+    // Fetch a larger set to account for JS filtering on date ranges
+    const snapshot = await query.limit(offset + limit + 500).get();
 
-    const enrichedLogs = auditLogs.map((log) => {
+    let logs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    // Apply date range filters in JS
+    if (startDate) {
+      const startMs = new Date(startDate).getTime();
+      logs = logs.filter((l: any) => new Date(l.createdAt).getTime() >= startMs);
+    }
+    if (endDate) {
+      const endMs = new Date(endDate).getTime();
+      logs = logs.filter((l: any) => new Date(l.createdAt).getTime() <= endMs);
+    }
+
+    const total = logs.length;
+    const paginatedLogs = logs.slice(offset, offset + limit);
+
+    // Enrich with organization data
+    const enrichedLogs = await Promise.all(paginatedLogs.map(async (log: any) => {
       let parsedDetails: Record<string, unknown> = {};
       try { parsedDetails = log.details ? JSON.parse(log.details) : {}; } catch { parsedDetails = {}; }
 
+      let organization: { id: string; name: string; slug: string } | null = null;
+      if (log.organizationId) {
+        const orgDoc = await adminDb.collection("organizations").doc(log.organizationId).get();
+        if (orgDoc.exists) {
+          const orgData = orgDoc.data();
+          organization = { id: orgDoc.id, name: orgData.name, slug: orgData.slug };
+        }
+      }
+
       return {
-        id: log.id, userId: log.userId, organizationId: log.organizationId,
-        organization: log.organization, action: log.action, resource: log.resource,
-        resourceId: log.resourceId, details: parsedDetails, ipAddress: log.ipAddress,
-        userAgent: log.userAgent, createdAt: log.createdAt,
+        id: log.id,
+        userId: log.userId,
+        organizationId: log.organizationId,
+        organization,
+        action: log.action,
+        resource: log.resource,
+        resourceId: log.resourceId,
+        details: parsedDetails,
+        ipAddress: log.ipAddress,
+        userAgent: log.userAgent,
+        createdAt: log.createdAt,
       };
-    });
+    }));
 
     return NextResponse.json({
       data: enrichedLogs,

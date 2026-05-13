@@ -1,35 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 // GET /api/analytics/productivity — Get productivity insights for a date range
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
     const type = searchParams.get("type");
 
-    const where: Record<string, unknown> = { userId: session.user.id };
+    // Fetch all productivity insights for the user and filter in JS
+    const snapshot = await adminDb
+      .collection("productivityInsights")
+      .where("userId", "==", userId)
+      .orderBy("date", "desc")
+      .get();
 
-    if (startDate || endDate) {
-      where.date = {};
-      if (startDate) (where.date as Record<string, unknown>).gte = startDate;
-      if (endDate) (where.date as Record<string, unknown>).lte = endDate;
-    }
+    let insights = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
+    // Apply filters in JS
     if (type) {
-      where.type = type;
+      insights = insights.filter((i: any) => i.type === type);
+    }
+    if (startDate) {
+      insights = insights.filter((i: any) => i.date >= startDate);
+    }
+    if (endDate) {
+      insights = insights.filter((i: any) => i.date <= endDate);
     }
 
-    const insights = await db.productivityInsight.findMany({
-      where,
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    // Sort by date desc then createdAt desc
+    insights.sort((a: any, b: any) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
     let totalDeepWorkHours = 0;
@@ -37,7 +49,7 @@ export async function GET(request: NextRequest) {
     let distractionCount = 0;
     let productivityScores: number[] = [];
 
-    for (const insight of insights) {
+    for (const insight of insights as Array<Record<string, any>>) {
       let metric: { value?: number; unit?: string } | null = null;
       try {
         metric = insight.metric ? JSON.parse(insight.metric) : null;
@@ -87,10 +99,12 @@ export async function GET(request: NextRequest) {
 // POST /api/analytics/productivity — Generate new productivity insights
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const body = await request.json();
     const { date, type, title, description, metric, action } = body;
@@ -121,19 +135,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const insight = await db.productivityInsight.create({
-      data: {
-        date,
-        type,
-        title,
-        description: description || null,
-        metric: metric ? JSON.stringify(metric) : null,
-        action: action || null,
-        userId: session.user.id,
-      },
-    });
+    const id = generateId();
+    const now = new Date().toISOString();
 
-    return NextResponse.json({ data: insight }, { status: 201 });
+    const insightData = {
+      date,
+      type,
+      title,
+      description: description || null,
+      metric: metric ? JSON.stringify(metric) : null,
+      action: action || null,
+      userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await adminDb.collection("productivityInsights").doc(id).set(insightData);
+
+    return NextResponse.json({ data: { id, ...insightData } }, { status: 201 });
   } catch (error) {
     console.error("[POST /api/analytics/productivity] Error:", error);
     return NextResponse.json({ error: "Failed to create productivity insight" }, { status: 500 });

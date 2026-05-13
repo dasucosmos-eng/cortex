@@ -6,7 +6,7 @@
 // ============================================================
 
 import ZAI from "z-ai-web-dev-sdk";
-import { db } from "@/lib/db";
+import { adminDb } from '@/lib/firebase'
 
 // --------------- Type Definitions ---------------
 
@@ -67,29 +67,22 @@ export async function detectInterruption(userId?: string, sessionId?: string): P
   const now = new Date();
   const interruptedSessions: SessionActivity[] = [];
 
-  const whereClause: Record<string, unknown> = sessionId
-    ? { id: sessionId, isActive: true }
-    : { isActive: true };
+  let query = adminDb.collection('sessions').where('isActive', '==', true)
+  if (userId) {
+    query = adminDb.collection('sessions').where('isActive', '==', true).where('userId', '==', userId)
+  }
+  if (sessionId) {
+    query = adminDb.collection('sessions').where('isActive', '==', true).where('id', '==', sessionId)
+  }
 
-  if (userId) whereClause.userId = userId;
-
-  const activeSessions = await db.session.findMany({
-    where: whereClause,
-    include: {
-      memories: { select: { id: true }, take: 1 },
-      timeline: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { id: true, createdAt: true },
-      },
-    },
-  });
+  const snapshot = await query.get()
+  const activeSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
 
   for (const session of activeSessions) {
-    const lastEvent = session.timeline[0];
-    const lastActivityAt = lastEvent?.createdAt
-      ? new Date(lastEvent.createdAt)
-      : session.startedAt;
+    const sessionData = session as any;
+    const lastActivityAt = sessionData.lastActivityAt
+      ? new Date(sessionData.lastActivityAt)
+      : (sessionData.startedAt ? new Date(sessionData.startedAt) : new Date(0));
 
     const timeSinceLastActivity = now.getTime() - lastActivityAt.getTime();
 
@@ -98,8 +91,8 @@ export async function detectInterruption(userId?: string, sessionId?: string): P
         sessionId: session.id,
         lastActivityAt,
         isActive: false, // Marked as interrupted
-        eventCount: session.timeline.length,
-        memoryCount: session.memories.length,
+        eventCount: sessionData.eventCount || 0,
+        memoryCount: sessionData.memoryCount || 0,
       });
     }
   }
@@ -113,28 +106,32 @@ export async function detectInterruption(userId?: string, sessionId?: string): P
  * Capture a full context snapshot at the point of interruption.
  */
 export async function createWorkflowSnapshot(sessionId: string): Promise<WorkflowSnapshot | null> {
-  const session = await db.session.findUnique({
-    where: { id: sessionId },
-    include: {
-      memories: {
-        orderBy: { createdAt: "desc" },
-        take: 30,
-      },
-      timeline: {
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      },
-    },
-  });
+  const sessionDoc = await adminDb.collection('sessions').doc(sessionId).get();
+  if (!sessionDoc.exists) return null;
+  const sessionData = sessionDoc.data() as any;
 
-  if (!session) return null;
+  // Fetch memories and timeline for this session
+  const memoriesSnapshot = await adminDb.collection('memories')
+    .where('sessionId', '==', sessionId)
+    .orderBy('createdAt', 'desc')
+    .limit(30)
+    .get();
+  const memories = memoriesSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  const timelineSnapshot = await adminDb.collection('timeline')
+    .where('sessionId', '==', sessionId)
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .get();
+  const timeline = timelineSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
   // Extract unique tabs from timeline events
   const tabMap = new Map<string, { url: string; title: string; domain: string; activeTime: number }>();
-  for (const event of session.timeline) {
-    const url = event.url || "";
-    const domain = event.domain || "";
-    const key = url || domain || event.title;
+  for (const event of timeline) {
+    const eventData = event as any;
+    const url = eventData.url || "";
+    const domain = eventData.domain || "";
+    const key = url || domain || eventData.title;
 
     if (tabMap.has(key)) {
       const existing = tabMap.get(key)!;
@@ -142,7 +139,7 @@ export async function createWorkflowSnapshot(sessionId: string): Promise<Workflo
     } else {
       tabMap.set(key, {
         url,
-        title: event.title,
+        title: eventData.title,
         domain,
         activeTime: 1,
       });
@@ -155,30 +152,34 @@ export async function createWorkflowSnapshot(sessionId: string): Promise<Workflo
 
   // Get knowledge graph nodes related to this session
   const relatedNodes: Array<Record<string, unknown>> = [];
-  for (const memory of session.memories.slice(0, 10)) {
+  for (const memory of memories.slice(0, 10)) {
+    const md = memory as any;
     relatedNodes.push({
       id: memory.id,
-      type: memory.type,
-      label: memory.title || memory.content.substring(0, 50),
-      metadata: memory.tags ? JSON.parse(memory.tags) : {},
+      type: md.type,
+      label: md.title || (md.content || '').substring(0, 50),
+      metadata: md.tags ? (typeof md.tags === 'string' ? JSON.parse(md.tags) : md.tags) : {},
     });
   }
 
   const snapshot: WorkflowSnapshot = {
-    sessionId: session.id,
-    type: inferWorkflowType(session, session.timeline),
-    title: session.title,
+    sessionId: sessionDoc.id,
+    type: inferWorkflowType(sessionData, timeline),
+    title: sessionData.title || '',
     tabs,
-    memories: session.memories.map((m) => ({
-      id: m.id,
-      type: m.type,
-      content: m.content,
-      summary: m.summary,
-      tags: m.tags,
-      url: m.url,
-      domain: m.domain,
-      createdAt: m.createdAt,
-    })),
+    memories: memories.map((m) => {
+      const md = m as any;
+      return {
+        id: m.id,
+        type: md.type,
+        content: md.content,
+        summary: md.summary,
+        tags: md.tags,
+        url: md.url,
+        domain: md.domain,
+        createdAt: md.createdAt,
+      };
+    }),
     graphNodes: relatedNodes,
     timestamp: new Date(),
   };
@@ -346,24 +347,12 @@ function calculateCompletenessScore(snapshot: WorkflowSnapshot): number {
 async function findRelatedRecentWork(
   snapshot: WorkflowSnapshot
 ): Promise<Array<Record<string, unknown>>> {
-  const recentSessions = await db.session.findMany({
-    where: {
-      isActive: false,
-      project: snapshot.title
-        ? { contains: snapshot.title.split(" ")[0] }
-        : undefined,
-    },
-    orderBy: { startedAt: "desc" },
-    take: 5,
-    select: {
-      id: true,
-      title: true,
-      project: true,
-      task: true,
-      startedAt: true,
-      endedAt: true,
-    },
-  });
+  let query = adminDb.collection('sessions').where('isActive', '==', false)
+    .orderBy('startedAt', 'desc')
+    .limit(5)
+
+  const snapshot_result = await query.get();
+  const recentSessions = snapshot_result.docs.map(d => ({ id: d.id, ...d.data() }));
 
   return recentSessions.filter((s) => s.id !== snapshot.sessionId);
 }

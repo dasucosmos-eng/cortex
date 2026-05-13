@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/auth";
 import { getOrchestrator } from "@/lib/ai/agent-orchestrator";
-import { auth } from "@/lib/auth";
 
 // GET /api/agents/executions — List recent agent executions
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

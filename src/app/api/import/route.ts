@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 // GET /api/import — List import configurations
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const imports = await db.memoryImport.findMany({
-      where: { userId: session.user.id },
-      orderBy: { createdAt: "desc" },
-    });
+    const userId = user.uid;
+
+    const snapshot = await adminDb
+      .collection("memoryImports")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const imports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
     return NextResponse.json({ data: imports });
   } catch (error) {
@@ -25,10 +31,12 @@ export async function GET() {
 // POST /api/import — Create new import configuration
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const body = await request.json();
     const { source, sourceId, externalUrl, metadata } = body;
@@ -42,18 +50,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Invalid source. Must be one of: ${validSources.join(", ")}` }, { status: 400 });
     }
 
-    const importConfig = await db.memoryImport.create({
-      data: {
-        source,
-        sourceId: sourceId || null,
-        externalUrl: externalUrl || null,
-        status: "pending",
-        metadata: metadata ? JSON.stringify(metadata) : null,
-        userId: session.user.id,
-      },
+    const id = generateId();
+    const now = new Date().toISOString();
+
+    await adminDb.collection("memoryImports").doc(id).set({
+      source,
+      sourceId: sourceId || null,
+      externalUrl: externalUrl || null,
+      status: "pending",
+      metadata: metadata ? JSON.stringify(metadata) : null,
+      userId,
+      createdAt: now,
+      updatedAt: now,
     });
 
-    return NextResponse.json({ data: importConfig }, { status: 201 });
+    return NextResponse.json({
+      data: { id, source, sourceId: sourceId || null, externalUrl: externalUrl || null, status: "pending", metadata: metadata ? JSON.stringify(metadata) : null, userId, createdAt: now, updatedAt: now },
+    }, { status: 201 });
   } catch (error) {
     console.error("[POST /api/import] Error:", error);
     return NextResponse.json({ error: "Failed to create import configuration" }, { status: 500 });

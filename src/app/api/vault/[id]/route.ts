@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
 import { randomBytes, createDecipheriv } from "crypto";
 
 let encryptionKey: Buffer | null = null;
@@ -31,26 +31,29 @@ function decrypt(
 
 // GET /api/vault/[id] — Retrieve and decrypt a vault item
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
 
     if (!id) {
       return NextResponse.json({ error: "Vault item ID is required" }, { status: 400 });
     }
 
-    const vaultItem = await db.vaultItem.findUnique({
-      where: { id },
-    });
+    const doc = await adminDb.collection("vault").doc(id).get();
+    if (!doc.exists) {
+      return NextResponse.json({ error: "Vault item not found" }, { status: 404 });
+    }
 
-    if (!vaultItem || vaultItem.userId !== session.user.id) {
+    const vaultItem = doc.data();
+    if (vaultItem.userId !== userId) {
       return NextResponse.json({ error: "Vault item not found" }, { status: 404 });
     }
 
@@ -62,7 +65,7 @@ export async function GET(
 
     return NextResponse.json({
       data: {
-        id: vaultItem.id,
+        id: doc.id,
         type: vaultItem.type,
         label: vaultItem.label,
         data: plaintext,
@@ -82,31 +85,33 @@ export async function GET(
 
 // DELETE /api/vault/[id] — Remove a vault item
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
 
     if (!id) {
       return NextResponse.json({ error: "Vault item ID is required" }, { status: 400 });
     }
 
-    const vaultItem = await db.vaultItem.findUnique({
-      where: { id },
-      select: { id: true, userId: true },
-    });
-
-    if (!vaultItem || vaultItem.userId !== session.user.id) {
+    const doc = await adminDb.collection("vault").doc(id).get();
+    if (!doc.exists) {
       return NextResponse.json({ error: "Vault item not found" }, { status: 404 });
     }
 
-    await db.vaultItem.delete({ where: { id } });
+    const vaultItem = doc.data();
+    if (vaultItem.userId !== userId) {
+      return NextResponse.json({ error: "Vault item not found" }, { status: 404 });
+    }
+
+    await adminDb.collection("vault").doc(id).delete();
 
     return NextResponse.json({ message: "Vault item deleted successfully" });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 // GET /api/organizations/[id]/members — List organization members with roles
 export async function GET(
@@ -8,35 +9,41 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
 
-    const membership = await db.orgMember.findFirst({
-      where: { organizationId: id, userId: session.user.id },
-    });
+    const membershipSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", userId)
+      .limit(1)
+      .get();
 
-    if (!membership) {
+    if (membershipSnap.empty) {
       return NextResponse.json({ error: "Not a member of this organization" }, { status: 403 });
     }
 
-    const organization = await db.organization.findUnique({ where: { id } });
-    if (!organization) {
+    const orgDoc = await adminDb.collection("organizations").doc(id).get();
+    if (!orgDoc.exists) {
       return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
-    const members = await db.orgMember.findMany({
-      where: { organizationId: id },
-      orderBy: { joinedAt: "asc" },
-    });
+    const membersSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .orderBy("joinedAt", "asc")
+      .get();
 
-    const enrichedMembers = members.map((m) => {
+    const enrichedMembers = membersSnap.docs.map((d) => {
+      const data = d.data();
       let parsedPermissions: string[] = [];
-      try { parsedPermissions = m.permissions ? JSON.parse(m.permissions) : []; } catch { parsedPermissions = []; }
-      return { ...m, permissions: parsedPermissions };
+      try { parsedPermissions = data.permissions ? JSON.parse(data.permissions) : []; } catch { parsedPermissions = []; }
+      return { id: d.id, ...data, permissions: parsedPermissions };
     });
 
     return NextResponse.json({
@@ -63,29 +70,38 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
     const body = await request.json();
-    const { userId, role, permissions } = body;
+    const { userId: targetUserId, role, permissions } = body;
 
-    const membership = await db.orgMember.findFirst({
-      where: { organizationId: id, userId: session.user.id },
-    });
+    const membershipSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", userId)
+      .limit(1)
+      .get();
 
-    if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+    if (membershipSnap.empty) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const organization = await db.organization.findUnique({ where: { id } });
-    if (!organization) {
+    const memberData = membershipSnap.docs[0].data();
+    if (memberData.role !== "owner" && memberData.role !== "admin") {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
+
+    const orgDoc = await adminDb.collection("organizations").doc(id).get();
+    if (!orgDoc.exists) {
       return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
-    if (!userId || typeof userId !== "string") {
+    if (!targetUserId || typeof targetUserId !== "string") {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
@@ -95,8 +111,15 @@ export async function POST(
       return NextResponse.json({ error: `Invalid role. Must be one of: ${validRoles.join(", ")}` }, { status: 400 });
     }
 
-    const existing = await db.orgMember.findFirst({ where: { organizationId: id, userId } });
-    if (existing) {
+    // Check if already a member
+    const existingSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", targetUserId)
+      .limit(1)
+      .get();
+
+    if (!existingSnap.empty) {
       return NextResponse.json({ error: "User is already a member of this organization" }, { status: 409 });
     }
 
@@ -104,14 +127,30 @@ export async function POST(
       ? JSON.stringify(permissions)
       : JSON.stringify(["memories:read", "agents:read", "vault:read"]);
 
-    const member = await db.orgMember.create({
-      data: { organizationId: id, userId, role: memberRole, permissions: serializedPermissions },
+    const memberId = generateId();
+    const now = new Date().toISOString();
+
+    await adminDb.collection("orgMembers").doc(memberId).set({
+      organizationId: id,
+      userId: targetUserId,
+      role: memberRole,
+      permissions: serializedPermissions,
+      joinedAt: now,
     });
 
     let parsedPermissions: string[] = [];
-    try { parsedPermissions = JSON.parse(member.permissions || "[]"); } catch { parsedPermissions = []; }
+    try { parsedPermissions = JSON.parse(serializedPermissions); } catch { parsedPermissions = []; }
 
-    return NextResponse.json({ data: { ...member, permissions: parsedPermissions } }, { status: 201 });
+    return NextResponse.json({
+      data: {
+        id: memberId,
+        organizationId: id,
+        userId: targetUserId,
+        role: memberRole,
+        permissions: parsedPermissions,
+        joinedAt: now,
+      },
+    }, { status: 201 });
   } catch (error) {
     console.error("[POST /api/organizations/[id]/members] Error:", error);
     return NextResponse.json({ error: "Failed to invite member" }, { status: 500 });
@@ -124,33 +163,51 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
     const body = await request.json();
-    const { userId, role, permissions } = body;
+    const { userId: targetUserId, role, permissions } = body;
 
-    if (!userId || typeof userId !== "string") {
+    if (!targetUserId || typeof targetUserId !== "string") {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
-    const myMembership = await db.orgMember.findFirst({
-      where: { organizationId: id, userId: session.user.id },
-    });
+    const myMembershipSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", userId)
+      .limit(1)
+      .get();
 
-    if (!myMembership || (myMembership.role !== "owner" && myMembership.role !== "admin")) {
+    if (myMembershipSnap.empty) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const member = await db.orgMember.findFirst({ where: { organizationId: id, userId } });
-    if (!member) {
+    const myRole = myMembershipSnap.docs[0].data().role;
+    if (myRole !== "owner" && myRole !== "admin") {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
+
+    // Find the target member
+    const memberSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", targetUserId)
+      .limit(1)
+      .get();
+
+    if (memberSnap.empty) {
       return NextResponse.json({ error: "Member not found in this organization" }, { status: 404 });
     }
 
-    const updateData: Record<string, unknown> = {};
+    const memberDoc = memberSnap.docs[0];
+
+    const updateData: Record<string, any> = {};
     if (role) {
       const validRoles = ["owner", "admin", "member", "viewer"];
       if (!validRoles.includes(role)) {
@@ -163,10 +220,13 @@ export async function PUT(
       updateData.permissions = JSON.stringify(permissions);
     }
 
-    const updatedMember = await db.orgMember.update({ where: { id: member.id }, data: updateData });
+    updateData.updatedAt = new Date().toISOString();
 
+    await adminDb.collection("orgMembers").doc(memberDoc.id).update(updateData);
+
+    const updatedMember = { id: memberDoc.id, ...memberDoc.data(), ...updateData };
     let parsedPermissions: string[] = [];
-    try { parsedPermissions = JSON.parse(updatedMember.permissions || "[]"); } catch { parsedPermissions = []; }
+    try { parsedPermissions = updatedMember.permissions ? JSON.parse(updatedMember.permissions) : []; } catch { parsedPermissions = []; }
 
     return NextResponse.json({ data: { ...updatedMember, permissions: parsedPermissions } });
   } catch (error) {
@@ -181,42 +241,66 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { id } = await params;
     const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("userId");
+    const targetUserId = searchParams.get("userId");
 
-    if (!userId) {
+    if (!targetUserId) {
       return NextResponse.json({ error: "userId query parameter is required" }, { status: 400 });
     }
 
-    const myMembership = await db.orgMember.findFirst({
-      where: { organizationId: id, userId: session.user.id },
-    });
+    const myMembershipSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", userId)
+      .limit(1)
+      .get();
 
-    if (!myMembership || (myMembership.role !== "owner" && myMembership.role !== "admin" && myMembership.userId !== userId)) {
+    if (myMembershipSnap.empty) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const member = await db.orgMember.findFirst({ where: { organizationId: id, userId } });
-    if (!member) {
+    const myRole = myMembershipSnap.docs[0].data().role;
+    if (myRole !== "owner" && myRole !== "admin" && userId !== targetUserId) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
+
+    // Find the target member
+    const memberSnap = await adminDb
+      .collection("orgMembers")
+      .where("organizationId", "==", id)
+      .where("userId", "==", targetUserId)
+      .limit(1)
+      .get();
+
+    if (memberSnap.empty) {
       return NextResponse.json({ error: "Member not found in this organization" }, { status: 404 });
     }
 
-    if (member.role === "owner") {
-      const ownerCount = await db.orgMember.count({ where: { organizationId: id, role: "owner" } });
-      if (ownerCount <= 1) {
+    const memberData = memberSnap.docs[0].data();
+
+    if (memberData.role === "owner") {
+      // Count owners
+      const ownersSnap = await adminDb
+        .collection("orgMembers")
+        .where("organizationId", "==", id)
+        .where("role", "==", "owner")
+        .get();
+
+      if (ownersSnap.size <= 1) {
         return NextResponse.json({ error: "Cannot remove the last owner. Transfer ownership to another member first." }, { status: 400 });
       }
     }
 
-    await db.orgMember.delete({ where: { id: member.id } });
+    await adminDb.collection("orgMembers").doc(memberSnap.docs[0].id).delete();
 
-    return NextResponse.json({ data: { userId, organizationId: id, removed: true }, message: "Member removed successfully" });
+    return NextResponse.json({ data: { userId: targetUserId, organizationId: id, removed: true }, message: "Member removed successfully" });
   } catch (error) {
     console.error("[DELETE /api/organizations/[id]/members] Error:", error);
     return NextResponse.json({ error: "Failed to remove member" }, { status: 500 });

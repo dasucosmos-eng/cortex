@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 // GET /api/hybrid-memory — List hybrid memories with tier filter
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
 
     const { searchParams } = new URL(request.url);
     const tier = searchParams.get("tier");
@@ -21,43 +22,60 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
     const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
 
-    // Get user's memory IDs for ownership filtering (HybridMemory has no userId field)
-    const userMemoryIds = await db.memory.findMany({
-      where: { userId },
-      select: { id: true },
-    });
-    const memoryIdList = userMemoryIds.map((m) => m.id);
-
-    const where: Record<string, unknown> = {};
-    if (memoryIdList.length > 0) {
-      where.memoryId = { in: memoryIdList };
-    } else {
-      where.id = "never-match";
-    }
-
     if (tier) {
       const validTiers = ["short_term", "long_term", "episodic", "semantic", "procedural"];
-      if (validTiers.includes(tier)) {
-        where.memoryTier = tier;
-      } else {
+      if (!validTiers.includes(tier)) {
         return NextResponse.json({ error: `Invalid tier. Must be one of: ${validTiers.join(", ")}` }, { status: 400 });
       }
     }
 
-    if (minImportance) where.importance = { gte: parseFloat(minImportance) };
-    if (!includeArchived) where.isArchived = false;
+    // Get user's memory IDs for ownership filtering (HybridMemory has no userId field)
+    const userMemoriesSnap = await adminDb
+      .collection("memories")
+      .where("userId", "==", userId)
+      .select("__name__")
+      .get();
+    const memoryIdList = userMemoriesSnap.docs.map((d) => d.id);
 
-    const orderBy: Record<string, string> = {};
-    if (["importance", "lastAccessed", "accessCount"].includes(sortBy)) {
-      orderBy[sortBy] = sortOrder === "asc" ? "asc" : "desc";
-    } else {
-      orderBy.lastAccessed = "desc";
+    // Build query on hybridMemories
+    // Firestore doesn't support "in" on more than 30 items — for simplicity, batch or filter in JS
+    let hybridSnap;
+    const orderByField = ["importance", "lastAccessed", "accessCount"].includes(sortBy) ? sortBy : "lastAccessed";
+    const orderDir = sortOrder === "asc" ? "asc" : "desc";
+
+    if (memoryIdList.length === 0) {
+      return NextResponse.json({
+        data: [],
+        pagination: { offset, limit, total: 0, hasMore: false },
+      });
     }
 
-    const [hybridMemories, total] = await Promise.all([
-      db.hybridMemory.findMany({ where, orderBy, skip: offset, take: limit }),
-      db.hybridMemory.count({ where }),
-    ]);
+    // Fetch all hybrid memories — filter by memoryId in JS
+    hybridSnap = await adminDb
+      .collection("hybridMemories")
+      .orderBy(orderByField, orderDir as "asc" | "desc")
+      .limit(500)
+      .get();
+
+    const allHybrid = hybridSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((hm: any) => memoryIdList.includes(hm.memoryId));
+
+    // Apply additional filters
+    let filtered = allHybrid;
+    if (tier) {
+      filtered = filtered.filter((hm: any) => hm.memoryTier === tier);
+    }
+    if (minImportance !== null) {
+      const minVal = parseFloat(minImportance!);
+      filtered = filtered.filter((hm: any) => (hm.importance || 0) >= minVal);
+    }
+    if (!includeArchived) {
+      filtered = filtered.filter((hm: any) => hm.isArchived !== true);
+    }
+
+    const total = filtered.length;
+    const hybridMemories = filtered.slice(offset, offset + limit);
 
     return NextResponse.json({
       data: hybridMemories,
@@ -72,12 +90,12 @@ export async function GET(request: NextRequest) {
 // POST /api/hybrid-memory — Promote/demote memory tier
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = user.uid;
 
     const body = await request.json();
     const { memoryId, newTier } = body;
@@ -87,11 +105,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify the memoryId belongs to the current user
-    const owningMemory = await db.memory.findUnique({
-      where: { id: memoryId },
-      select: { id: true, userId: true },
-    });
-    if (!owningMemory || owningMemory.userId !== userId) {
+    const memoryDoc = await adminDb.collection("memories").doc(memoryId).get();
+    if (!memoryDoc.exists) {
+      return NextResponse.json({ error: "Memory not found or access denied" }, { status: 404 });
+    }
+    if (memoryDoc.data().userId !== userId) {
       return NextResponse.json({ error: "Memory not found or access denied" }, { status: 404 });
     }
 
@@ -100,16 +118,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `newTier is required. Must be one of: ${validTiers.join(", ")}` }, { status: 400 });
     }
 
-    const existing = await db.hybridMemory.findFirst({ where: { memoryId } });
+    // Check if hybrid memory already exists
+    const existingSnap = await adminDb
+      .collection("hybridMemories")
+      .where("memoryId", "==", memoryId)
+      .limit(1)
+      .get();
 
-    let hybridMemory;
-    if (existing) {
-      hybridMemory = await db.hybridMemory.update({
-        where: { id: existing.id },
-        data: { memoryTier: newTier, lastAccessed: new Date() },
+    let hybridMemory: Record<string, any>;
+    const now = new Date().toISOString();
+
+    if (existingSnap.docs.length > 0) {
+      const existingId = existingSnap.docs[0].id;
+      await adminDb.collection("hybridMemories").doc(existingId).update({
+        memoryTier: newTier,
+        lastAccessed: now,
+        updatedAt: now,
       });
+      hybridMemory = { id: existingId, memoryId, memoryTier: newTier, lastAccessed: now };
     } else {
-      hybridMemory = await db.hybridMemory.create({ data: { memoryId, memoryTier: newTier } });
+      const id = generateId();
+      await adminDb.collection("hybridMemories").doc(id).set({
+        memoryId,
+        memoryTier: newTier,
+        lastAccessed: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      hybridMemory = { id, memoryId, memoryTier: newTier, lastAccessed: now };
     }
 
     return NextResponse.json({ data: hybridMemory });

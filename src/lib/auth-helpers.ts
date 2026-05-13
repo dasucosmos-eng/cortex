@@ -1,23 +1,9 @@
-import bcrypt from 'bcryptjs'
-import { db } from '@/lib/db'
-import { authOptions } from '@/lib/auth'
+import { adminDb, adminAuth } from '@/lib/firebase'
+import { serverTimestamp } from '@/lib/db'
+import { NextRequest } from 'next/server'
 
 // ============================================================
-// Password Utilities
-// ============================================================
-
-/** Hash a password using bcrypt (12 salt rounds) */
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12)
-}
-
-/** Verify a password against a stored bcrypt hash */
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash)
-}
-
-// ============================================================
-// Auth Helpers
+// Auth Helpers (Firebase-based)
 // ============================================================
 
 type AuthUser = {
@@ -25,6 +11,7 @@ type AuthUser = {
   email?: string | null
   name?: string | null
   role?: string
+  picture?: string | null
 }
 
 /**
@@ -44,47 +31,45 @@ export async function requireAuth(request: Request): Promise<AuthUser> {
 
 /**
  * Get the current authenticated user from session.
- * Extracts token from Authorization header or cookie.
+ * Extracts token from Authorization header.
  */
 export async function getCurrentUser(request: Request): Promise<AuthUser | null> {
   try {
-    // Dynamic import to avoid circular dependency
-    const { getServerSession } = await import('next-auth')
-
-    // For API routes: try to get session from headers
     const authHeader = request.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '')
+    if (!authHeader?.startsWith('Bearer ')) return null
 
-    if (token) {
-      // Decode JWT to get user info (simple approach for demo)
-      // In production, use jwt.verify with the NEXTAUTH_SECRET
-      const parts = token.split('.')
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
-        return {
-          id: payload.sub ?? payload.id,
-          email: payload.email,
-          name: payload.name,
-          role: payload.role ?? 'user',
-        }
+    const token = authHeader.split('Bearer ')[1]
+    const decoded = await adminAuth.verifyIdToken(token)
+
+    // Look up user record in Firestore for role info
+    let role = 'user'
+    try {
+      const userDoc = await adminDb.collection('users').doc(decoded.uid).get()
+      if (userDoc.exists) {
+        const userData = userDoc.data()
+        role = userData?.role || 'user'
       }
+    } catch {
+      // User doc may not exist yet (first login)
     }
 
-    // Fallback: use getServerSession
-    const session = await getServerSession(authOptions)
-    if (session?.user) {
-      return {
-        id: (session.user as { id?: string }).id ?? '',
-        email: session.user.email,
-        name: session.user.name,
-        role: (session.user as { role?: string }).role ?? 'user',
-      }
+    return {
+      id: decoded.uid,
+      email: decoded.email || null,
+      name: decoded.name || null,
+      role,
+      picture: decoded.picture || null,
     }
-
-    return null
   } catch {
     return null
   }
+}
+
+/**
+ * Get the current user from a NextRequest (API route helper).
+ */
+export async function getUserFromRequest(req: NextRequest): Promise<AuthUser | null> {
+  return getCurrentUser(req)
 }
 
 // ============================================================
@@ -93,52 +78,27 @@ export async function getCurrentUser(request: Request): Promise<AuthUser | null>
 
 /**
  * Check if a user can access a resource with a specific permission.
- * Demo implementation with basic role-based access control.
  */
 export async function canAccess(
   userId: string,
-  resourceId: string,
-  permission: string
+  _resourceId: string,
+  _permission: string
 ): Promise<boolean> {
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true, id: true },
-  })
+  try {
+    const userDoc = await adminDb.collection('users').doc(userId).get()
+    if (!userDoc.exists) return false
 
-  if (!user) return false
+    const userData = userDoc.data()
+    const role = userData?.role || 'user'
 
-  // Admins have full access
-  if (user.role === 'admin' || user.role === 'owner') return true
+    // Admins have full access
+    if (role === 'admin' || role === 'owner') return true
 
-  // Check organization membership for resource-based access
-  const orgMember = await db.orgMember.findFirst({
-    where: {
-      userId: user.id,
-      organization: {
-        OR: [
-          { id: resourceId },
-          { workspaces: { some: { id: resourceId } } },
-        ],
-      },
-    },
-  })
-
-  if (orgMember) {
-    const permissions = orgMember.permissions
-      ? JSON.parse(orgMember.permissions) as Record<string, string>
-      : {}
-
-    // Check if the user has the specific permission
-    const resourcePermission = permissions[permission]
-    if (resourcePermission === 'read_write' || resourcePermission === 'admin') return true
-    if (resourcePermission === 'read_only' && permission.startsWith('read')) return true
-
-    // Owners and admins in org have full access
-    if (orgMember.role === 'owner' || orgMember.role === 'admin') return true
+    // Default: allow access for authenticated users
+    return true
+  } catch {
+    return false
   }
-
-  // Default: check if user owns the resource
-  return true
 }
 
 // ============================================================
@@ -155,14 +115,14 @@ export async function createAuditLog(
   details?: Record<string, unknown>
 ) {
   try {
-    return await db.auditLog.create({
-      data: {
-        action,
-        resource,
-        resourceId,
-        details: details ? JSON.stringify(details) : null,
-      },
+    await adminDb.collection('auditLogs').add({
+      action,
+      resource,
+      resourceId,
+      details: details ? JSON.stringify(details) : null,
+      createdAt: serverTimestamp,
     })
+    return null
   } catch (error) {
     // Log errors silently to avoid blocking the main operation
     console.error('[AuditLog] Failed to create audit log:', error)

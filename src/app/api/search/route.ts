@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { verifyAuth } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase";
+import { generateId } from "@/lib/db";
 
 interface SearchResultItem {
   id: string;
@@ -50,11 +51,12 @@ function calculateScore(
 // GET /api/search — Semantic search endpoint
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = user.uid;
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q") || "";
     const type = searchParams.get("type") || undefined;
@@ -69,28 +71,22 @@ export async function GET(request: NextRequest) {
 
     const queryTerms = query.trim().split(/\s+/);
     const results: SearchResultItem[] = [];
-    const userId = session.user.id;
+    const lowerQuery = query.toLowerCase();
 
-    // Search memories
-    const memoryWhere: Record<string, unknown> = { userId };
-    if (type) memoryWhere.type = type;
-    if (projectId) memoryWhere.projectId = projectId;
+    // Search memories — Firestore doesn't support text search, fetch and filter in JS
+    let memoriesQuery = adminDb
+      .collection("memories")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .limit(50);
 
-    const memories = await db.memory.findMany({
-      where: {
-        ...memoryWhere,
-        OR: [
-          { content: { contains: query } },
-          { summary: { contains: query } },
-          { title: { contains: query } },
-          { tags: { contains: query } },
-        ],
-      },
-      take: 50,
-      orderBy: { createdAt: "desc" },
-    });
+    const memoriesSnapshot = await memoriesQuery.get();
+    const memories = memoriesSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-    for (const memory of memories) {
+    for (const memory of memories as Array<Record<string, any>>) {
       const searchableText = [
         memory.content,
         memory.summary,
@@ -99,6 +95,11 @@ export async function GET(request: NextRequest) {
       ]
         .filter(Boolean)
         .join(" ");
+
+      // Apply type and projectId filters in JS
+      if (type && memory.type !== type) continue;
+      if (projectId && memory.projectId !== projectId) continue;
+
       const score = calculateScore(searchableText, query, queryTerms);
       if (score > 0) {
         results.push({
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest) {
           title: memory.title || "Untitled Memory",
           content: memory.summary || memory.content,
           score,
-          createdAt: memory.createdAt.toISOString(),
+          createdAt: memory.createdAt,
           metadata: {
             memoryType: memory.type,
             url: memory.url,
@@ -120,21 +121,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Search sessions
-    const sessions = await db.session.findMany({
-      where: {
-        userId,
-        OR: [
-          { title: { contains: query } },
-          { task: { contains: query } },
-          { intent: { contains: query } },
-          { summary: { contains: query } },
-        ],
-      },
-      take: 20,
-      orderBy: { startedAt: "desc" },
-    });
+    const sessionsSnapshot = await adminDb
+      .collection("sessions")
+      .where("userId", "==", userId)
+      .orderBy("startedAt", "desc")
+      .limit(20)
+      .get();
 
-    for (const sessionItem of sessions) {
+    const sessions = sessionsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    for (const sessionItem of sessions as Array<Record<string, any>>) {
       const searchableText = [
         sessionItem.title,
         sessionItem.task,
@@ -151,7 +150,7 @@ export async function GET(request: NextRequest) {
           title: sessionItem.title,
           content: sessionItem.task || sessionItem.summary || sessionItem.intent || "",
           score,
-          createdAt: sessionItem.startedAt.toISOString(),
+          createdAt: sessionItem.startedAt,
           metadata: {
             isActive: sessionItem.isActive,
             project: sessionItem.project,
@@ -161,26 +160,25 @@ export async function GET(request: NextRequest) {
     }
 
     // Search timeline events
-    const timelineWhere: Record<string, unknown> = { userId };
-    if (type) timelineWhere.type = type;
+    const timelineSnapshot = await adminDb
+      .collection("timeline")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .limit(30)
+      .get();
 
-    const timelineEvents = await db.timelineEvent.findMany({
-      where: {
-        ...timelineWhere,
-        OR: [
-          { title: { contains: query } },
-          { metadata: { contains: query } },
-          { domain: { contains: query } },
-        ],
-      },
-      take: 30,
-      orderBy: { createdAt: "desc" },
-    });
+    const timelineEvents = timelineSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-    for (const event of timelineEvents) {
+    for (const event of timelineEvents as Array<Record<string, any>>) {
       const searchableText = [event.title, event.domain, event.metadata]
         .filter(Boolean)
         .join(" ");
+
+      if (type && event.type !== type) continue;
+
       const score = calculateScore(searchableText, query, queryTerms);
       if (score > 0) {
         results.push({
@@ -189,7 +187,7 @@ export async function GET(request: NextRequest) {
           title: event.title,
           content: event.domain || "",
           score,
-          createdAt: event.createdAt.toISOString(),
+          createdAt: event.createdAt,
           metadata: {
             eventType: event.type,
             url: event.url,
@@ -202,13 +200,13 @@ export async function GET(request: NextRequest) {
     results.sort((a, b) => b.score - a.score);
 
     // Log the search query
-    await db.searchQuery.create({
-      data: {
-        query: query.trim(),
-        results: JSON.stringify(results.slice(0, 20).map((r) => r.id)),
-        filters: JSON.stringify({ type, projectId }),
-        userId,
-      },
+    const searchId = generateId();
+    await adminDb.collection("searchQueries").doc(searchId).set({
+      query: query.trim(),
+      results: JSON.stringify(results.slice(0, 20).map((r) => r.id)),
+      filters: JSON.stringify({ type, projectId }),
+      userId,
+      createdAt: new Date().toISOString(),
     });
 
     return NextResponse.json({
@@ -228,10 +226,12 @@ export async function GET(request: NextRequest) {
 // POST /api/search — Advanced search with filters in body
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const user = await verifyAuth(request);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = user.uid;
 
     const body = await request.json();
     const {
@@ -254,83 +254,92 @@ export async function POST(request: NextRequest) {
 
     const query = q.trim();
     const queryTerms = query.split(/\s+/);
-    const where: Record<string, unknown> = { userId: session.user.id };
 
-    if (type) {
-      if (Array.isArray(type)) {
-        where.type = { in: type };
-      } else {
-        where.type = type;
-      }
+    // Build Firestore query — filter by userId, apply equality filters, then JS filter text
+    let firestoreQuery = adminDb
+      .collection("memories")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc");
+
+    if (type && typeof type === "string") {
+      firestoreQuery = firestoreQuery.where("type", "==", type);
     }
-    if (projectId) {
-      if (Array.isArray(projectId)) {
-        where.projectId = { in: projectId };
-      } else {
-        where.projectId = projectId;
-      }
+    if (projectId && typeof projectId === "string") {
+      firestoreQuery = firestoreQuery.where("projectId", "==", projectId);
     }
-    if (domain) {
-      if (Array.isArray(domain)) {
-        where.domain = { in: domain };
-      } else {
-        where.domain = domain;
-      }
+    if (domain && typeof domain === "string") {
+      firestoreQuery = firestoreQuery.where("domain", "==", domain);
     }
     if (isSensitive !== undefined) {
-      where.isSensitive = Boolean(isSensitive);
+      firestoreQuery = firestoreQuery.where("isSensitive", "==", Boolean(isSensitive));
     }
-    if (dateRange) {
-      where.createdAt = {};
-      if (dateRange.start) {
-        (where.createdAt as Record<string, unknown>).gte = new Date(
-          dateRange.start
-        );
+
+    const fetchLimit = Math.min(100, Math.max(1, limit));
+    const snapshot = await firestoreQuery.limit(fetchLimit).get();
+
+    const allMemories = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    // JS filtering: text match, array type filter, tags, date range
+    const lowerQuery = query.toLowerCase();
+    const filtered = allMemories.filter((memory: Record<string, any>) => {
+      // Text search
+      const searchableText = [
+        memory.content,
+        memory.summary,
+        memory.title,
+        memory.tags,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      const matchesText = searchableText.includes(lowerQuery) ||
+        queryTerms.some((term) => term && searchableText.includes(term.toLowerCase()));
+
+      if (!matchesText) return false;
+
+      // Array type filter
+      if (Array.isArray(type)) {
+        if (!type.includes(memory.type)) return false;
       }
-      if (dateRange.end) {
-        (where.createdAt as Record<string, unknown>).lte = new Date(
-          dateRange.end
-        );
+
+      // Array projectId filter
+      if (Array.isArray(projectId)) {
+        if (!projectId.includes(memory.projectId)) return false;
       }
-    }
 
-    if (tags && Array.isArray(tags) && tags.length > 0) {
-      const tagConditions = tags.map((tag: string) => ({
-        tags: { contains: tag },
-      }));
-      where.OR = [...(where.OR as unknown[] || []), ...tagConditions];
-    }
-
-    const textSearchConditions = [
-      { content: { contains: query } },
-      { summary: { contains: query } },
-      { title: { contains: query } },
-    ];
-
-    if (tags && Array.isArray(tags)) {
-      for (const tag of tags) {
-        textSearchConditions.push({ tags: { contains: tag } });
+      // Array domain filter
+      if (Array.isArray(domain)) {
+        if (!domain.includes(memory.domain)) return false;
       }
-    }
 
-    if (where.OR) {
-      where.AND = [
-        { OR: textSearchConditions },
-        { OR: where.OR as unknown[] },
-      ];
-      delete where.OR;
-    } else {
-      where.OR = textSearchConditions;
-    }
+      // Tag filtering
+      if (tags && Array.isArray(tags) && tags.length > 0) {
+        const memTags: string[] = [];
+        try { memTags.push(...JSON.parse(String(memory.tags || "[]"))); } catch { /* ignore */ }
+        if (!tags.some((tag: string) => memTags.includes(tag))) return false;
+      }
 
-    const memories = await db.memory.findMany({
-      where,
-      take: Math.min(100, Math.max(1, limit)),
-      orderBy: { createdAt: "desc" },
+      // Date range filtering
+      if (dateRange) {
+        if (dateRange.start) {
+          const memDate = new Date(memory.createdAt);
+          if (memDate < new Date(dateRange.start)) return false;
+        }
+        if (dateRange.end) {
+          const memDate = new Date(memory.createdAt);
+          if (memDate > new Date(dateRange.end)) return false;
+        }
+      }
+
+      return true;
     });
 
-    const results = memories
-      .map((memory) => {
+    const results = filtered
+      .map((memory: Record<string, any>) => {
         const searchableText = [
           memory.content,
           memory.summary,
@@ -346,7 +355,7 @@ export async function POST(request: NextRequest) {
           title: memory.title || "Untitled Memory",
           content: memory.summary || memory.content,
           score,
-          createdAt: memory.createdAt.toISOString(),
+          createdAt: memory.createdAt,
           metadata: {
             memoryType: memory.type,
             url: memory.url,
@@ -360,13 +369,14 @@ export async function POST(request: NextRequest) {
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    await db.searchQuery.create({
-      data: {
-        query,
-        results: JSON.stringify(results.slice(0, 50).map((r) => r.id)),
-        filters: JSON.stringify({ type, projectId, domain, tags, dateRange, isSensitive }),
-        userId: session.user.id,
-      },
+    // Log the search query
+    const searchId = generateId();
+    await adminDb.collection("searchQueries").doc(searchId).set({
+      query,
+      results: JSON.stringify(results.slice(0, 50).map((r) => r.id)),
+      filters: JSON.stringify({ type, projectId, domain, tags, dateRange, isSensitive }),
+      userId,
+      createdAt: new Date().toISOString(),
     });
 
     return NextResponse.json({
