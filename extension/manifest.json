@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Memora Bond — AI Browser Memory",
   "version": "1.0.0",
-  "description": "Automatically track your browsing activity, save web page content, and build a searchable knowledge base. View your browsing timeline, search across visited pages, and recall previously viewed information from a sidebar dashboard.",
+  "description": "Track your browsing, save web content, and build a searchable knowledge base from pages you visit.",
   "permissions": [
     "tabs",
     "activeTab",
