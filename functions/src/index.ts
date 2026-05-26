@@ -5,18 +5,60 @@
 import { https } from 'firebase-functions/v2';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleAuth } from 'google-auth-library';
 
 const PROJECT_ID = 'memora-bond';
 const LOCATION = 'us-central1';
 
-// Google Gen AI client — uses Vertex AI backend (no API key needed, uses service account)
-let genAIClient: GoogleGenAI | null = null;
-function getGenAI(): GoogleGenAI {
-  if (!genAIClient) {
-    genAIClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: LOCATION });
+// Google Auth client — uses default service account credentials
+let googleAuth: GoogleAuth | null = null;
+function getGoogleAuth(): GoogleAuth {
+  if (!googleAuth) {
+    googleAuth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
   }
-  return genAIClient;
+  return googleAuth;
+}
+
+// Get OAuth2 access token for Vertex AI calls
+let cachedAccessToken: string | null = null;
+let tokenExpiry = 0;
+async function getGoogleCloudAccessToken(): Promise<string> {
+  if (cachedAccessToken && Date.now() < tokenExpiry) {
+    return cachedAccessToken;
+  }
+  const auth = getGoogleAuth();
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  cachedAccessToken = tokenResponse.token || '';
+  // Token expires in 1 hour, cache for 50 minutes
+  tokenExpiry = Date.now() + 50 * 60 * 1000;
+  return cachedAccessToken;
+}
+
+// Call Gemini via Vertex AI REST API (most reliable approach)
+async function callGeminiVertexAI(prompt: string): Promise<string> {
+  const accessToken = await getGoogleCloudAccessToken();
+  const apiUrl = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.0-flash:generateContent`;
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+    }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Vertex AI API ${response.status}: ${errBody}`);
+  }
+
+  const data: any = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
 }
 
 setGlobalOptions({ region: 'us-central1', minInstances: 0 });
@@ -908,13 +950,8 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
       .join('\n');
 
     try {
-      const ai = getGenAI();
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`,
-      });
-
-      const aiContent = response.text || 'No response generated.';
+      const prompt = `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`;
+      const aiContent = await callGeminiVertexAI(prompt);
 
       // Try to parse as JSON, otherwise return as text
       let parsed;
@@ -937,9 +974,10 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({ data: parsed });
     } catch (aiError: any) {
-      console.error('AI recall error:', aiError);
-      const errMsg = aiError?.message || 'Unknown AI error';
+      console.error('AI recall error:', aiError?.message, aiError?.stack);
       res.set(corsHeaders(req.headers?.origin));
+      // Return actual error for debugging while keeping user-friendly message
+      const debugInfo = aiError?.message || 'Unknown AI error';
       return res.status(200).json({
         data: {
           currentProject: null,
@@ -948,8 +986,9 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
             id: m.id, type: m.type, summary: (m.summary || m.content || '').substring(0, 100),
           })),
           suggestedNextSteps: [],
-          response: `AI service encountered an error. Showing ${relevantMemories.length} matching memories above.`,
+          response: `I couldn't process your request right now. ${relevantMemories.length > 0 ? `However, I found ${relevantMemories.length} relevant memories that might help:` : 'No matching memories were found.'}`,
           error: true,
+          debugError: debugInfo,
         },
       });
     }
@@ -1031,21 +1070,37 @@ export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) 
     if (!imageData) return res.status(400).json({ error: 'Image data required' });
 
     try {
-      const ai = getGenAI();
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [
-          {
+      // Call Gemini Vision via Vertex AI REST API
+      const accessToken = await getGoogleCloudAccessToken();
+      const apiUrl = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.0-flash:generateContent`;
+
+      const visionResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
             role: 'user',
             parts: [
               { text: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.' },
               { inlineData: { mimeType: 'image/png', data: imageData } },
             ],
-          },
-        ],
+          }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
+        }),
       });
 
-      const analysis = response.text || 'Could not analyze image.';
+      let analysis: string;
+      if (visionResponse.ok) {
+        const visionData: any = await visionResponse.json();
+        analysis = visionData.candidates?.[0]?.content?.parts?.[0]?.text || 'Could not analyze image.';
+      } else {
+        const errText = await visionResponse.text();
+        console.error('Vision API error:', errText);
+        analysis = 'Visual analysis unavailable.';
+      }
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({ description: analysis, analyzedAt: new Date().toISOString() });
     } catch (aiError: any) {
