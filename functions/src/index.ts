@@ -5,7 +5,18 @@
 import { https } from 'firebase-functions/v2';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
-import ZAI from 'z-ai-web-dev-sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Gemini AI client — initialized lazily when first needed
+let geminiClient: GoogleGenerativeAI | null = null;
+function getGeminiClient(): GoogleGenerativeAI {
+  if (!geminiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+    geminiClient = new GoogleGenerativeAI(apiKey);
+  }
+  return geminiClient;
+}
 
 setGlobalOptions({ region: 'us-central1', minInstances: 0 });
 
@@ -862,7 +873,7 @@ async function getPayPalAccessToken(): Promise<string | null> {
 
 // ============================
 // POST /api/ai/recall
-// AI recall endpoint — retrieves relevant context using ZAI
+// AI recall endpoint — retrieves relevant context using Gemini AI
 // ============================
 export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
@@ -896,22 +907,17 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
       .join('\n');
 
     try {
-      const zai = await ZAI.create();
+      const genAI = getGeminiClient();
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-      const completion = await zai.chat.completions.create({
-        messages: [
-          {
-            role: 'system',
-            content: `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful response. Be concise and specific. If no relevant memories are found, say so honestly.`,
-          },
-          {
-            role: 'user',
-            content: `Query: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`,
-          },
-        ],
+      const completion = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [{ text: `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}` }],
+        }],
       });
 
-      const aiContent = completion.choices?.[0]?.message?.content || 'No response generated.';
+      const aiContent = completion.response?.text() || 'No response generated.';
 
       // Try to parse as JSON, otherwise return as text
       let parsed;
@@ -936,6 +942,7 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
     } catch (aiError: any) {
       console.error('AI recall error:', aiError);
       const errMsg = aiError?.message || 'Unknown AI error';
+      const isConfigError = errMsg.includes('GEMINI_API_KEY') || errMsg.includes('API_KEY');
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({
         data: {
@@ -945,7 +952,9 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
             id: m.id, type: m.type, summary: (m.summary || m.content || '').substring(0, 100),
           })),
           suggestedNextSteps: [],
-          response: `AI service encountered an error: ${errMsg}. Showing ${relevantMemories.length} matching memories above.`,
+          response: isConfigError
+            ? 'AI service is being configured. Please check back shortly.'
+            : `AI service encountered an error. Showing ${relevantMemories.length} matching memories above.`,
           error: true,
         },
       });
@@ -1015,7 +1024,7 @@ export const apiSettings = https.onRequest(async (req: any, res: any) => {
 
 // ============================
 // POST /api/memory/process-image
-// Analyzes screenshot image using ZAI
+// Analyzes screenshot image using Gemini Vision
 // ============================
 export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
@@ -1028,21 +1037,20 @@ export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) 
     if (!imageData) return res.status(400).json({ error: 'Image data required' });
 
     try {
-      const zai = await ZAI.create();
-      const completion = await zai.chat.completions.create({
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.',
-          },
-          {
-            role: 'user',
-            content: 'Analyze this screenshot and describe what you see.',
-          },
-        ],
+      const genAI = getGeminiClient();
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+      const completion = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.' },
+            { inlineData: { mimeType: 'image/png', data: imageData } },
+          ],
+        }],
       });
 
-      const analysis = completion.choices?.[0]?.message?.content || 'Could not analyze image.';
+      const analysis = completion.response?.text() || 'Could not analyze image.';
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({ description: analysis, analyzedAt: new Date().toISOString() });
     } catch (aiError: any) {
