@@ -603,7 +603,7 @@ export const apiKnowledgeGraph = https.onRequest(async (req: any, res: any) => {
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const memSnap = await adminDb.collection('users').doc(uid).collection('memories').limit(200).get();
-    const memories = memSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const memories = memSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, any>));
 
     const nodeMap = new Map<string, { id: string; type: string; label: string }>();
     const edges: Array<{ fromId: string; toId: string; type: string; strength: number }> = [];
