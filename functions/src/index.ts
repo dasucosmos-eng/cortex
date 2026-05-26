@@ -5,17 +5,18 @@
 import { https } from 'firebase-functions/v2';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
-// Gemini AI client — initialized lazily when first needed
-let geminiClient: GoogleGenerativeAI | null = null;
-function getGeminiClient(): GoogleGenerativeAI {
-  if (!geminiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
-    geminiClient = new GoogleGenerativeAI(apiKey);
+const PROJECT_ID = 'memora-bond';
+const LOCATION = 'us-central1';
+
+// Google Gen AI client — uses Vertex AI backend (no API key needed, uses service account)
+let genAIClient: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI {
+  if (!genAIClient) {
+    genAIClient = new GoogleGenAI({ vertexai: true, project: PROJECT_ID, location: LOCATION });
   }
-  return geminiClient;
+  return genAIClient;
 }
 
 setGlobalOptions({ region: 'us-central1', minInstances: 0 });
@@ -907,17 +908,13 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
       .join('\n');
 
     try {
-      const genAI = getGeminiClient();
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-      const completion = await model.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [{ text: `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}` }],
-        }],
+      const ai = getGenAI();
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`,
       });
 
-      const aiContent = completion.response?.text() || 'No response generated.';
+      const aiContent = response.text || 'No response generated.';
 
       // Try to parse as JSON, otherwise return as text
       let parsed;
@@ -942,7 +939,6 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
     } catch (aiError: any) {
       console.error('AI recall error:', aiError);
       const errMsg = aiError?.message || 'Unknown AI error';
-      const isConfigError = errMsg.includes('GEMINI_API_KEY') || errMsg.includes('API_KEY');
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({
         data: {
@@ -952,9 +948,7 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
             id: m.id, type: m.type, summary: (m.summary || m.content || '').substring(0, 100),
           })),
           suggestedNextSteps: [],
-          response: isConfigError
-            ? 'AI service is being configured. Please check back shortly.'
-            : `AI service encountered an error. Showing ${relevantMemories.length} matching memories above.`,
+          response: `AI service encountered an error. Showing ${relevantMemories.length} matching memories above.`,
           error: true,
         },
       });
@@ -1024,7 +1018,7 @@ export const apiSettings = https.onRequest(async (req: any, res: any) => {
 
 // ============================
 // POST /api/memory/process-image
-// Analyzes screenshot image using Gemini Vision
+// Analyzes screenshot image using Gemini Vision via Vertex AI
 // ============================
 export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
@@ -1037,20 +1031,21 @@ export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) 
     if (!imageData) return res.status(400).json({ error: 'Image data required' });
 
     try {
-      const genAI = getGeminiClient();
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-      const completion = await model.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.' },
-            { inlineData: { mimeType: 'image/png', data: imageData } },
-          ],
-        }],
+      const ai = getGenAI();
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.' },
+              { inlineData: { mimeType: 'image/png', data: imageData } },
+            ],
+          },
+        ],
       });
 
-      const analysis = completion.response?.text() || 'Could not analyze image.';
+      const analysis = response.text || 'Could not analyze image.';
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({ description: analysis, analyzedAt: new Date().toISOString() });
     } catch (aiError: any) {
