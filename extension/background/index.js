@@ -1632,13 +1632,14 @@ async function authenticate(idToken) {
   try {
     const serverUrl = AUTH_STATE.serverUrl;
 
-    // Validate the token by getting a custom token from the server
+    // Validate the token by sending it to the server
     const response = await fetch(`${serverUrl}/api/auth/extension-token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${idToken}`,
       },
+      body: JSON.stringify({ idToken }),
     });
     if (!response.ok) {
       const err = await response.json();
