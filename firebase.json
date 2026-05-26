@@ -41,7 +41,13 @@
       { "source": "/api/vault", "function": "apiVault" },
       { "source": "/api/vault/**", "function": "apiVault" },
       { "source": "/api/sync", "function": "apiSync" },
-      { "source": "/api/ai/recall", "function": "apiAiRecall" }
+      { "source": "/api/ai/recall", "function": "apiAiRecall" },
+      { "source": "/api/data/clear", "function": "apiDataClear" },
+      { "source": "/api/settings", "function": "apiSettings" },
+      { "source": "/api/memory/process-image", "function": "apiMemoryProcessImage" },
+      { "source": "/api/workflow/continuation", "function": "apiWorkflowContinuation" },
+      { "source": "/api/import/connectors", "function": "apiImportConnectors" },
+      { "source": "/api/import", "function": "apiImport" }
     ],
     "headers": [
       {

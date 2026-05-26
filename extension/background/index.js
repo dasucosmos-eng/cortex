@@ -1574,6 +1574,36 @@ chrome.runtime.onStartup.addListener(async () => {
   await restoreCriticalState();
 });
 
+// Periodic auth token refresh — re-reads the website cookie every 25 minutes
+// Firebase ID tokens expire after 1 hour. The website auto-refreshes them,
+// so re-reading the cookie keeps the extension's token fresh.
+chrome.alarms?.create('auth-refresh', { periodInMinutes: 25 });
+
+chrome.alarms?.onAlarm?.addListener(async (alarm) => {
+  if (alarm.name === 'auth-refresh') {
+    console.log('[Memora Bond] Periodic auth refresh check');
+    try {
+      const token = await getMemoraCookie();
+      if (token) {
+        // Re-authenticate with the fresh token from the website cookie
+        const result = await authenticate(token);
+        if (result.success) {
+          console.log('[Memora Bond] Token refreshed via website cookie');
+        }
+      } else if (AUTH_STATE.isAuthenticated) {
+        // Cookie gone (user logged out on website) — clear extension auth
+        console.log('[Memora Bond] Website cookie gone, clearing extension auth');
+        AUTH_STATE.isAuthenticated = false;
+        AUTH_STATE.userId = null;
+        AUTH_STATE.token = null;
+        await chrome.storage.local.remove(['authToken', 'authServerUrl', 'isAuthenticated']);
+      }
+    } catch (err) {
+      console.log('[Memora Bond] Auth refresh error:', err.message);
+    }
+  }
+});
+
 // Open side panel when action icon is clicked (can be triggered by popup)
 chrome.action.onClicked.addListener(async (tab) => {
   // This only fires when there's no popup, but we have a popup

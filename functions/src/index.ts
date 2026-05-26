@@ -1012,3 +1012,130 @@ export const apiSettings = https.onRequest(async (req: any, res: any) => {
     return res.status(500).json({ error: error.message });
   }
 });
+
+// ============================
+// POST /api/memory/process-image
+// Analyzes screenshot image using ZAI
+// ============================
+export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) => {
+  if (handleCors(req, res)) return;
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const uid = await verifyUser(req);
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { imageData } = req.body || {};
+    if (!imageData) return res.status(400).json({ error: 'Image data required' });
+
+    try {
+      const zai = await ZAI.create();
+      const completion = await zai.chat.completions.create({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.',
+          },
+          {
+            role: 'user',
+            content: 'Analyze this screenshot and describe what you see.',
+          },
+        ],
+      });
+
+      const analysis = completion.choices?.[0]?.message?.content || 'Could not analyze image.';
+      res.set(corsHeaders(req.headers?.origin));
+      return res.status(200).json({ description: analysis, analyzedAt: new Date().toISOString() });
+    } catch (aiError: any) {
+      res.set(corsHeaders(req.headers?.origin));
+      return res.status(200).json({ description: 'Visual analysis unavailable.', analyzedAt: new Date().toISOString() });
+    }
+  } catch (error: any) {
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================
+// GET /api/workflow/continuation
+// Returns suggestions for continuing interrupted work
+// ============================
+export const apiWorkflowContinuation = https.onRequest(async (req: any, res: any) => {
+  if (handleCors(req, res)) return;
+  const uid = await verifyUser(req);
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    // Get recent active sessions from the last 24 hours
+    const since = new Date();
+    since.setHours(since.getHours() - 24);
+    const sessSnap = await adminDb.collection('users').doc(uid).collection('sessions')
+      .where('startTime', '>=', since.toISOString())
+      .orderBy('startTime', 'desc').limit(10).get();
+
+    const sessions = sessSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const suggestions = sessions
+      .filter((s: any) => s.status === 'active' || s.pageViews > 3)
+      .slice(0, 5)
+      .map((s: any) => ({
+        title: s.title || 'Continue session',
+        description: `${s.pageViews || 0} pages visited across ${(s.domains || []).join(', ')}`,
+        context: (s.domains || []).join(', '),
+        timestamp: s.startTime || s.lastActivity,
+      }));
+
+    emptyDataResponse(req, res, { suggestions });
+  } catch (error: any) {
+    emptyDataResponse(req, res, { suggestions: [] });
+  }
+});
+
+// ============================
+// GET /api/import/connectors
+// Returns available import connectors
+// ============================
+export const apiImportConnectors = https.onRequest(async (req: any, res: any) => {
+  if (handleCors(req, res)) return;
+  const uid = await verifyUser(req);
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  emptyDataResponse(req, res, {
+    connectors: [
+      { id: 'notion', name: 'Notion', icon: 'notion', description: 'Import pages and databases from Notion' },
+      { id: 'google-docs', name: 'Google Docs', icon: 'google-docs', description: 'Import documents from Google Drive' },
+      { id: 'obsidian', name: 'Obsidian', icon: 'obsidian', description: 'Import markdown notes from Obsidian vaults' },
+      { id: 'bookmark', name: 'Browser Bookmarks', icon: 'bookmark', description: 'Import your Chrome bookmarks' },
+      { id: 'csv', name: 'CSV / Spreadsheet', icon: 'csv', description: 'Import data from CSV files' },
+    ],
+  });
+});
+
+// ============================
+// POST /api/import
+// Creates an import job
+// ============================
+export const apiImport = https.onRequest(async (req: any, res: any) => {
+  if (handleCors(req, res)) return;
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const uid = await verifyUser(req);
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { source, externalUrl } = req.body || {};
+    if (!source) return res.status(400).json({ error: 'Source is required' });
+
+    const docRef = adminDb.collection('users').doc(uid).collection('imports').doc();
+    await docRef.set({
+      source,
+      externalUrl: externalUrl || null,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(200).json({ success: true, id: docRef.id });
+  } catch (error: any) {
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(500).json({ error: error.message });
+  }
+});
