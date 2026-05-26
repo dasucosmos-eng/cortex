@@ -5,56 +5,45 @@
 import { https } from 'firebase-functions/v2';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
-import { GoogleAuth } from 'google-auth-library';
 
 const PROJECT_ID = 'memora-bond';
-const LOCATION = 'us-central1';
 
-// Google Auth client — uses default service account credentials
-let googleAuth: GoogleAuth | null = null;
-function getGoogleAuth(): GoogleAuth {
-  if (!googleAuth) {
-    googleAuth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
-  }
-  return googleAuth;
+// Gemini API key — stored securely in Firestore _config/ai, cached in memory
+let cachedGeminiApiKey: string | null = null;
+async function getGeminiApiKey(): Promise<string | null> {
+  if (cachedGeminiApiKey) return cachedGeminiApiKey;
+  try {
+    const doc = await adminDb.collection('_config').doc('ai').get();
+    if (doc.exists) {
+      cachedGeminiApiKey = doc.data()?.gemini_api_key || null;
+      return cachedGeminiApiKey;
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
-// Get OAuth2 access token for Vertex AI calls
-let cachedAccessToken: string | null = null;
-let tokenExpiry = 0;
-async function getGoogleCloudAccessToken(): Promise<string> {
-  if (cachedAccessToken && Date.now() < tokenExpiry) {
-    return cachedAccessToken;
-  }
-  const auth = getGoogleAuth();
-  const client = await auth.getClient();
-  const tokenResponse = await client.getAccessToken();
-  cachedAccessToken = tokenResponse.token || '';
-  // Token expires in 1 hour, cache for 50 minutes
-  tokenExpiry = Date.now() + 50 * 60 * 1000;
-  return cachedAccessToken;
-}
+// Call Gemini via API key (generativelanguage API)
+async function callGemini(prompt: string, parts?: any[]): Promise<string> {
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) throw new Error('Gemini API key not configured');
 
-// Call Gemini via Vertex AI REST API (most reliable approach)
-async function callGeminiVertexAI(prompt: string): Promise<string> {
-  const accessToken = await getGoogleCloudAccessToken();
-  const apiUrl = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.0-flash:generateContent`;
+  const contents: any = [{ role: 'user', parts: parts || [{ text: prompt }] }];
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+      }),
     },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-    }),
-  });
+  );
 
   if (!response.ok) {
     const errBody = await response.text();
-    throw new Error(`Vertex AI API ${response.status}: ${errBody}`);
+    throw new Error(`Gemini API ${response.status}: ${errBody}`);
   }
 
   const data: any = await response.json();
@@ -951,7 +940,7 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
 
     try {
       const prompt = `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`;
-      const aiContent = await callGeminiVertexAI(prompt);
+      const aiContent = await callGemini(prompt);
 
       // Try to parse as JSON, otherwise return as text
       let parsed;
@@ -1057,7 +1046,7 @@ export const apiSettings = https.onRequest(async (req: any, res: any) => {
 
 // ============================
 // POST /api/memory/process-image
-// Analyzes screenshot image using Gemini Vision via Vertex AI
+// Analyzes screenshot image using Gemini Vision
 // ============================
 export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
@@ -1070,37 +1059,13 @@ export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) 
     if (!imageData) return res.status(400).json({ error: 'Image data required' });
 
     try {
-      // Call Gemini Vision via Vertex AI REST API
-      const accessToken = await getGoogleCloudAccessToken();
-      const apiUrl = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.0-flash:generateContent`;
-
-      const visionResponse = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.' },
-              { inlineData: { mimeType: 'image/png', data: imageData } },
-            ],
-          }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
-        }),
-      });
-
-      let analysis: string;
-      if (visionResponse.ok) {
-        const visionData: any = await visionResponse.json();
-        analysis = visionData.candidates?.[0]?.content?.parts?.[0]?.text || 'Could not analyze image.';
-      } else {
-        const errText = await visionResponse.text();
-        console.error('Vision API error:', errText);
-        analysis = 'Visual analysis unavailable.';
-      }
+      // Call Gemini Vision via API key
+      const visionPrompt = 'You are a visual memory assistant for Memora Bond. Analyze the provided screenshot and extract: 1) A brief description of what is shown 2) Key text content visible 3) The type of page (code, docs, social, etc.) 4) Any URLs visible. Respond in JSON format.';
+      const visionParts = [
+        { text: visionPrompt },
+        { inlineData: { mimeType: 'image/png', data: imageData } },
+      ];
+      const analysis = await callGemini(visionPrompt, visionParts);
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({ description: analysis, analyzedAt: new Date().toISOString() });
     } catch (aiError: any) {
