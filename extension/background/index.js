@@ -1271,12 +1271,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'CHECK_WEBSITE_AUTH': {
           // Popup asks for current auth status (one-shot check)
           try {
-            const cookie = await chrome.cookies.get({
-              url: 'https://memora.bond',
-              name: 'memora_token',
-            });
-            if (cookie && cookie.value) {
-              await authenticate(cookie.value);
+            const token = await getMemoraCookie();
+            if (token) {
+              await authenticate(token);
               sendResponse({ success: true, authenticated: AUTH_STATE.isAuthenticated });
             } else {
               sendResponse({ success: true, authenticated: false });
@@ -1589,6 +1586,18 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 let _authPollingActive = false;
 
+// Helper: check cookie from both memora.bond and memora-bond.web.app
+async function getMemoraCookie() {
+  const urls = ['https://memora.bond', 'https://memora-bond.web.app'];
+  for (const url of urls) {
+    try {
+      const cookie = await chrome.cookies.get({ url, name: 'memora_token' });
+      if (cookie && cookie.value) return cookie.value;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 async function startAuthPolling() {
   if (_authPollingActive) return; // Already polling
   _authPollingActive = true;
@@ -1596,13 +1605,10 @@ async function startAuthPolling() {
 
   for (let i = 0; i < 150; i++) { // 5 minutes max (150 * 2s)
     try {
-      const cookie = await chrome.cookies.get({
-        url: 'https://memora.bond',
-        name: 'memora_token',
-      });
-      if (cookie && cookie.value) {
+      const token = await getMemoraCookie();
+      if (token) {
         console.log('[Memora Bond] Found memora_token cookie, authenticating...');
-        const result = await authenticate(cookie.value);
+        const result = await authenticate(token);
         if (result.success) {
           console.log('[Memora Bond] Extension authenticated via website sign-in!');
           _authPollingActive = false;
@@ -1693,15 +1699,12 @@ async function restoreAuth() {
       return;
     }
 
-    // Try to read token from website cookie (memora.bond)
+    // Try to read token from website cookie (both domains)
     try {
-      const cookie = await chrome.cookies.get({
-        url: 'https://memora.bond',
-        name: 'memora_token',
-      });
-      if (cookie && cookie.value) {
+      const token = await getMemoraCookie();
+      if (token) {
         console.log('[Memora Bond] Found token from website cookie, authenticating...');
-        await authenticate(cookie.value);
+        await authenticate(token);
       }
     } catch (cookieErr) {
       console.log('[Memora Bond] Could not read website cookie:', cookieErr.message);

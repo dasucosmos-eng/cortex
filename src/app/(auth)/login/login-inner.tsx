@@ -26,7 +26,7 @@ export default function LoginPageInner() {
     localStorage.setItem('memora_token', idToken)
 
     // Set cookie so extension can read it
-    document.cookie = `memora_token=${idToken}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+    document.cookie = `memora_token=${idToken}; path=/; domain=.${window.location.hostname.split('.').slice(-2).join('.')}; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
 
     // POST to backend to create/update user record
     try {

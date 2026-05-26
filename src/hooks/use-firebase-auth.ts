@@ -9,6 +9,15 @@ interface AuthState {
   loading: boolean
 }
 
+function getCookieDomain() {
+  try {
+    const parts = window.location.hostname.split('.')
+    return '.' + parts.slice(-2).join('.')
+  } catch {
+    return ''
+  }
+}
+
 export function useFirebaseAuth() {
   const [state, setState] = useState<AuthState>({ user: null, token: null, loading: true })
 
@@ -18,14 +27,15 @@ export function useFirebaseAuth() {
         try {
           const token = await user.getIdToken()
           setState({ user, token, loading: false })
-          // Store token for middleware cookie
-          document.cookie = `memora_token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+          const domain = getCookieDomain()
+          document.cookie = `memora_token=${token}; path=/; domain=${domain}; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
         } catch {
           setState({ user, token: null, loading: false })
         }
       } else {
         setState({ user: null, token: null, loading: false })
-        document.cookie = 'memora_token=; path=/; max-age=0'
+        const domain = getCookieDomain()
+        document.cookie = `memora_token=; path=/; domain=${domain}; max-age=0`
       }
     })
     return () => unsubscribe()
@@ -34,7 +44,8 @@ export function useFirebaseAuth() {
   const signOut = useCallback(async () => {
     await firebaseSignOut(auth)
     localStorage.removeItem('memora_token')
-    document.cookie = 'memora_token=; path=/; max-age=0'
+    const domain = getCookieDomain()
+    document.cookie = `memora_token=; path=/; domain=${domain}; max-age=0`
     window.location.href = '/login'
   }, [])
 
