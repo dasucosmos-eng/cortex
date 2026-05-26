@@ -8,46 +8,59 @@ import * as admin from 'firebase-admin';
 
 const PROJECT_ID = 'memora-bond';
 
-// Gemini API key — stored securely in Firestore _config/ai, cached in memory
-let cachedGeminiApiKey: string | null = null;
-async function getGeminiApiKey(): Promise<string | null> {
-  if (cachedGeminiApiKey) return cachedGeminiApiKey;
+// ============================
+// Z.AI Integration — credentials from Firestore _config/ai, cached in memory
+// ============================
+let cachedZaiConfig: { apiKey: string; baseUrl: string; xToken: string } | null = null;
+async function getZaiConfig(): Promise<{ apiKey: string; baseUrl: string; xToken: string } | null> {
+  if (cachedZaiConfig) return cachedZaiConfig;
   try {
     const doc = await adminDb.collection('_config').doc('ai').get();
     if (doc.exists) {
-      cachedGeminiApiKey = doc.data()?.gemini_api_key || null;
-      return cachedGeminiApiKey;
+      const d = doc.data();
+      if (d?.zai_api_key && d?.zai_base_url && d?.zai_x_token) {
+        cachedZaiConfig = {
+          apiKey: d.zai_api_key,
+          baseUrl: d.zai_base_url,
+          xToken: d.zai_x_token,
+        };
+        return cachedZaiConfig;
+      }
     }
   } catch { /* ignore */ }
   return null;
 }
 
-// Call Gemini via API key (generativelanguage API)
-async function callGemini(prompt: string, parts?: any[]): Promise<string> {
-  const apiKey = await getGeminiApiKey();
-  if (!apiKey) throw new Error('Gemini API key not configured');
+// Call z.ai chat completions API (OpenAI-compatible)
+async function callZai(systemPrompt: string, userMessage: string): Promise<string> {
+  const config = await getZaiConfig();
+  if (!config) throw new Error('Z.AI credentials not configured in Firestore _config/ai');
 
-  const contents: any = [{ role: 'user', parts: parts || [{ text: prompt }] }];
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-      }),
+  const url = `${config.baseUrl}/chat/completions`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+      'X-Token': config.xToken,
+      'X-Z-AI-From': 'Z',
     },
-  );
+    body: JSON.stringify({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      thinking: { type: 'disabled' },
+    }),
+  });
 
   if (!response.ok) {
     const errBody = await response.text();
-    throw new Error(`Gemini API ${response.status}: ${errBody}`);
+    throw new Error(`Z.AI API ${response.status}: ${errBody}`);
   }
 
   const data: any = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
+  return data.choices?.[0]?.message?.content || 'No response generated.';
 }
 
 setGlobalOptions({ region: 'us-central1', minInstances: 0 });
@@ -939,8 +952,10 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
       .join('\n');
 
     try {
-      const prompt = `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.\n\nQuery: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`;
-      const aiContent = await callGemini(prompt);
+      const aiContent = await callZai(
+        "You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful, concise, and specific response. If no relevant memories are found, say so honestly.",
+        `Query: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`
+      );
 
       // Try to parse as JSON, otherwise return as text
       let parsed;
@@ -1065,7 +1080,35 @@ export const apiMemoryProcessImage = https.onRequest(async (req: any, res: any) 
         { text: visionPrompt },
         { inlineData: { mimeType: 'image/png', data: imageData } },
       ];
-      const analysis = await callGemini(visionPrompt, visionParts);
+      // Vision: call z.ai with image data inline
+      const config = await getZaiConfig();
+      if (!config) throw new Error('Z.AI not configured');
+      const visionUrl = `${config.baseUrl}/chat/completions/vision`;
+      const visionResponse = await fetch(visionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`,
+          'X-Token': config.xToken,
+          'X-Z-AI-From': 'Z',
+        },
+        body: JSON.stringify({
+          messages: [{
+            role: 'user',
+            content: visionParts,
+          }],
+          thinking: { type: 'disabled' },
+        }),
+      });
+      let analysis: string;
+      if (visionResponse.ok) {
+        const visionData: any = await visionResponse.json();
+        analysis = visionData.choices?.[0]?.message?.content || 'Could not analyze image.';
+      } else {
+        const errText = await visionResponse.text();
+        console.error('Vision API error:', errText);
+        analysis = 'Visual analysis unavailable.';
+      }
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({ description: analysis, analyzedAt: new Date().toISOString() });
     } catch (aiError: any) {
