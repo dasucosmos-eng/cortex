@@ -186,7 +186,7 @@ function isSensitiveUrl(url) {
   if (!url) return true;
   try {
     const hostname = new URL(url).hostname;
-    return SENSITIVE_DOMAINS.some(pattern => pattern.test(hostname + url));
+    return SENSITIVE_DOMAINS.some(pattern => pattern.test(hostname));
   } catch {
     return true;
   }

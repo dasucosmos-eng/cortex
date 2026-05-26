@@ -50,6 +50,8 @@ import {
   Puzzle,
   Chrome,
   CreditCard,
+  Plus,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -475,6 +477,28 @@ export default function DashboardPage() {
     }
     return true
   })
+  const [extensionConnected, setExtensionConnected] = useState(false)
+
+  // Check for extension=connected query param (static export — can't use useSearchParams)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('extension') === 'connected') {
+        setExtensionConnected(true)
+        // Clean the URL without reload
+        const url = new URL(window.location.href)
+        url.searchParams.delete('extension')
+        window.history.replaceState({}, '', url.toString())
+      }
+    }
+  }, [])
+
+  // Dialog states
+  const [showCreateAgentDialog, setShowCreateAgentDialog] = useState(false)
+  const [showAddVaultDialog, setShowAddVaultDialog] = useState(false)
+  const [newAgentType, setNewAgentType] = useState('')
+  const [newAgentName, setNewAgentName] = useState('')
+  const [newVaultItem, setNewVaultItem] = useState({ name: '', type: 'API Key', value: '', tags: '' })
 
   // Dashboard data
   const [memories, setMemories] = useState<Memory[]>([])
@@ -514,6 +538,7 @@ export default function DashboardPage() {
   // Memories filter state
   const [memoryTypeFilter, setMemoryTypeFilter] = useState<string>('all')
   const [memorySearch, setMemorySearch] = useState('')
+  const [subscriptionError, setSubscriptionError] = useState(false)
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -552,11 +577,19 @@ export default function DashboardPage() {
       setGraphData(kgRes.data || null)
       setAgents(Array.isArray(agRes.data?.agents) ? agRes.data.agents : [])
 
-      // Fetch subscription status
-      const subRes = await fetch('/api/paypal/subscription-status', { headers: authH }).catch(() => null)
-      if (subRes?.ok) {
-        const subJson = await subRes.json()
-        setSubscriptionData(subJson)
+      // Fetch subscription status with 5-second timeout
+      try {
+        setSubscriptionError(false)
+        const subController = new AbortController()
+        const subTimeout = setTimeout(() => subController.abort(), 5000)
+        const subRes = await fetch('/api/paypal/subscription-status', { headers: authH, signal: subController.signal }).catch(() => null)
+        clearTimeout(subTimeout)
+        if (subRes?.ok) {
+          const subJson = await subRes.json()
+          setSubscriptionData(subJson)
+        }
+      } catch {
+        setSubscriptionError(true)
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err)
@@ -624,8 +657,17 @@ export default function DashboardPage() {
     setSearchResults(null)
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`, { headers: getAuthHeaders(authToken) })
+      if (!res.ok) throw new Error('Search failed')
       const json = await res.json()
-      setSearchResults(json.data || [])
+      const data = json.data
+      // Handle both array and { results: [] } formats
+      if (Array.isArray(data)) {
+        setSearchResults(data)
+      } else if (data && Array.isArray(data.results)) {
+        setSearchResults(data.results)
+      } else {
+        setSearchResults([])
+      }
     } catch (err) {
       console.error('Search failed:', err)
       setSearchResults([])
@@ -653,9 +695,15 @@ export default function DashboardPage() {
       })
       const json = await res.json()
       const data = json.data
-      const responseText = typeof data === 'string'
-        ? data
-        : JSON.stringify(data, null, 2)
+      // Extract just the response text from the AI payload
+      let responseText: string
+      if (typeof data === 'string') {
+        responseText = data
+      } else if (data && typeof data === 'object') {
+        responseText = data.response || data.message || data.content || JSON.stringify(data)
+      } else {
+        responseText = String(data || 'No response generated.')
+      }
       setChatMessages((prev) => [
         ...prev,
         { role: 'assistant', content: responseText, timestamp: new Date().toISOString() },
@@ -697,8 +745,8 @@ export default function DashboardPage() {
         <p className="text-sm text-zinc-500 mt-0.5">Here&apos;s your cognitive workspace overview</p>
       </motion.div>
 
-      {/* Install Extension Banner — always visible, dismissible */}
-      {!isLoading && !authLoading && showExtensionBanner && (
+      {/* Install Extension Banner — hidden when extension=connected */}
+      {!isLoading && !authLoading && showExtensionBanner && !extensionConnected && (
         <motion.div
           variants={staggerItem}
           className="relative overflow-hidden rounded-xl border border-violet-500/30 bg-gradient-to-br from-violet-500/15 via-zinc-900/80 to-cyan-500/15 p-6"
@@ -728,6 +776,25 @@ export default function DashboardPage() {
             >
               <Download size={14} className="mr-2" /> Get the Extension
             </Button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Extension Connected Banner */}
+      {!isLoading && !authLoading && extensionConnected && (
+        <motion.div
+          variants={staggerItem}
+          className="relative overflow-hidden rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-zinc-900/80 to-cyan-500/15 p-5"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center shrink-0">
+              <Puzzle size={20} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold text-zinc-100 mb-0.5">Extension Connected</h2>
+              <p className="text-xs text-zinc-400">Your browser extension is active and syncing data to this dashboard.</p>
+            </div>
+            <Badge className="text-[10px] border-0 bg-emerald-500/15 text-emerald-400">CONNECTED</Badge>
           </div>
         </motion.div>
       )}
@@ -1331,7 +1398,7 @@ export default function DashboardPage() {
                   {['What was I working on today?', 'Summarize my recent research', 'Find related code snippets'].map((suggestion) => (
                     <button
                       key={suggestion}
-                      onClick={() => setChatInput(suggestion)}
+                      onClick={() => { setChatInput(suggestion); setTimeout(() => handleRecall(), 100) }}
                       className="px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-[10px] text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/70 transition-all"
                     >
                       {suggestion}
@@ -1353,7 +1420,7 @@ export default function DashboardPage() {
                       ? 'bg-violet-500/15 border border-violet-500/20'
                       : 'glass border-zinc-800/30'
                   }`}>
-                    <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">{msg.role === 'assistant' ? (() => { try { const parsed = JSON.parse(msg.content); return parsed.response || parsed.message || msg.content } catch { return msg.content } })() : msg.content}</p>
                     <span className="text-[9px] text-zinc-600 mt-1 block">{formatTimeAgo(msg.timestamp)}</span>
                   </div>
                 </motion.div>
@@ -1402,10 +1469,56 @@ export default function DashboardPage() {
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-zinc-100">AI Agents</h2>
-        <Button variant="outline" size="sm" onClick={() => { fetchDashboardData(); fetchExecutions() }} className="border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800/50">
-          <RefreshCw size={12} className="mr-1.5" /> Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => setShowCreateAgentDialog(true)} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">
+            <Plus size={12} className="mr-1.5" /> Create Agent
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { fetchDashboardData(); fetchExecutions() }} className="border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800/50">
+            <RefreshCw size={12} className="mr-1.5" /> Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Create Agent Dialog */}
+      {showCreateAgentDialog && (
+        <Card className="glass border-zinc-800/30 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium text-zinc-200">Create New Agent</h3>
+            <button onClick={() => setShowCreateAgentDialog(false)} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1.5">Agent Type</label>
+              <Select value={newAgentType} onValueChange={setNewAgentType}>
+                <SelectTrigger className="h-9 w-full bg-zinc-900/50 border-zinc-800/50 text-xs text-zinc-300">
+                  <SelectValue placeholder="Select type..." />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-900 border-zinc-800">
+                  <SelectItem value="curator" className="text-zinc-300 text-xs">Memory Curator</SelectItem>
+                  <SelectItem value="research" className="text-zinc-300 text-xs">Research Assistant</SelectItem>
+                  <SelectItem value="coding" className="text-zinc-300 text-xs">Knowledge Builder</SelectItem>
+                  <SelectItem value="summarization" className="text-zinc-300 text-xs">Summarizer</SelectItem>
+                  <SelectItem value="debugging" className="text-zinc-300 text-xs">Debug Assistant</SelectItem>
+                  <SelectItem value="connector" className="text-zinc-300 text-xs">Link Connector</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1.5">Agent Name (optional)</label>
+              <Input
+                value={newAgentName}
+                onChange={(e) => setNewAgentName(e.target.value)}
+                placeholder="e.g. My Research Agent"
+                className="h-9 bg-zinc-900/50 border-zinc-800/50 text-xs text-zinc-300"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={() => { setShowCreateAgentDialog(false); setNewAgentType(''); setNewAgentName('') }} variant="outline" className="border-zinc-700/50 text-zinc-400 text-xs">Cancel</Button>
+              <Button onClick={() => { setShowCreateAgentDialog(false); setNewAgentType(''); setNewAgentName('') }} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">Create</Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Agent Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -1486,10 +1599,77 @@ export default function DashboardPage() {
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-zinc-100">Vault</h2>
-        <Button variant="outline" size="sm" onClick={fetchVault} className="border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800/50">
-          <RefreshCw size={12} className="mr-1.5" /> Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => setShowAddVaultDialog(true)} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">
+            <Plus size={12} className="mr-1.5" /> Add to Vault
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchVault} className="border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800/50">
+            <RefreshCw size={12} className="mr-1.5" /> Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Add to Vault Dialog */}
+      {showAddVaultDialog && (
+        <Card className="glass border-zinc-800/30 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium text-zinc-200">Add to Vault</h3>
+            <button onClick={() => setShowAddVaultDialog(false)} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1.5">Name</label>
+              <Input
+                value={newVaultItem.name}
+                onChange={(e) => setNewVaultItem(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g. API Key for OpenAI"
+                className="h-9 bg-zinc-900/50 border-zinc-800/50 text-xs text-zinc-300"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1.5">Type</label>
+              <Select value={newVaultItem.type} onValueChange={(v) => setNewVaultItem(prev => ({ ...prev, type: v }))}>
+                <SelectTrigger className="h-9 w-full bg-zinc-900/50 border-zinc-800/50 text-xs text-zinc-300">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-900 border-zinc-800">
+                  <SelectItem value="API Key" className="text-zinc-300 text-xs">API Key</SelectItem>
+                  <SelectItem value="Password" className="text-zinc-300 text-xs">Password</SelectItem>
+                  <SelectItem value="Note" className="text-zinc-300 text-xs">Note</SelectItem>
+                  <SelectItem value="Credential" className="text-zinc-300 text-xs">Credential</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1.5">Value</label>
+              <Input
+                type="password"
+                value={newVaultItem.value}
+                onChange={(e) => setNewVaultItem(prev => ({ ...prev, value: e.target.value }))}
+                placeholder="Enter value..."
+                className="h-9 bg-zinc-900/50 border-zinc-800/50 text-xs text-zinc-300"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1.5">Tags (comma-separated)</label>
+              <Input
+                value={newVaultItem.tags}
+                onChange={(e) => setNewVaultItem(prev => ({ ...prev, tags: e.target.value }))}
+                placeholder="e.g. openai, production, api"
+                className="h-9 bg-zinc-900/50 border-zinc-800/50 text-xs text-zinc-300"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={() => { setShowAddVaultDialog(false); setNewVaultItem({ name: '', type: 'API Key', value: '', tags: '' }) }} variant="outline" className="border-zinc-700/50 text-zinc-400 text-xs">Cancel</Button>
+              <Button onClick={() => {
+                setShowAddVaultDialog(false)
+                setNewVaultItem({ name: '', type: 'API Key', value: '', tags: '' })
+                fetchVault()
+              }} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">Save</Button>
+            </div>
+          </div>
+        </Card>
+      )}
       <div className="glow-border rounded-xl p-4 mb-4">
         <div className="flex items-center gap-2">
           <Lock size={14} className="text-violet-400" />
@@ -1704,7 +1884,7 @@ export default function DashboardPage() {
             <CreditCard size={14} className="text-violet-400" /> Subscription & Billing
           </h3>
           <Separator className="bg-zinc-800/50" />
-          {subscriptionData ? (
+          {subscriptionData && !subscriptionError ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1741,8 +1921,15 @@ export default function DashboardPage() {
                 </a>
               )}
             </div>
+          ) : subscriptionError ? (
+            <div className="space-y-3">
+              <p className="text-xs text-zinc-500">Unable to load subscription info.</p>
+              <Button onClick={fetchDashboardData} variant="outline" className="border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800/50">
+                <RefreshCw size={12} className="mr-1.5" /> Retry
+              </Button>
+            </div>
           ) : (
-            <p className="text-xs text-zinc-500">Loading subscription info...</p>
+            <p className="text-xs text-zinc-500">Unable to load subscription info. <button onClick={fetchDashboardData} className="text-violet-400 underline hover:no-underline">Retry</button></p>
           )}
         </CardContent>
       </Card>

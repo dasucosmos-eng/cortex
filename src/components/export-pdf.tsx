@@ -80,8 +80,20 @@ export function ExportPDFButton() {
 
       const html = buildExportHTML(result)
       await generatePDF(html, `${result.title}.pdf`)
+      // Show success feedback
+      const btn = document.querySelector(`[data-export-type="${type}"]`)
+      if (btn) {
+        const orig = btn.innerHTML
+        btn.innerHTML = '<span style="color: #10b981;">✓ Done!</span>'
+        setTimeout(() => { btn.innerHTML = orig }, 2000)
+      }
     } catch (error: any) {
-      alert('Export failed: ' + error.message)
+      const btn = document.querySelector(`[data-export-type="${type}"]`)
+      if (btn) {
+        const orig = btn.innerHTML
+        btn.innerHTML = '<span style="color: #ef4444;">✗ Failed</span>'
+        setTimeout(() => { btn.innerHTML = orig }, 2000)
+      }
     } finally {
       setIsExporting(false)
       setExportType(null)
@@ -102,6 +114,7 @@ export function ExportPDFButton() {
         ].map((item) => (
           <button
             key={item.type}
+            data-export-type={item.type}
             onClick={() => handleExport(item.type)}
             disabled={isExporting}
             className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-800/50 hover:bg-zinc-800/30 transition-colors text-xs text-zinc-300 hover:text-zinc-100 disabled:opacity-50"

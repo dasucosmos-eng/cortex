@@ -725,7 +725,7 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
       return res.status(200).json({ data: parsed });
     } catch (aiError: any) {
       console.error('AI recall error:', aiError);
-      // Fallback: return memories without AI processing
+      const errMsg = aiError?.message || 'Unknown AI error';
       res.set(corsHeaders(req.headers?.origin));
       return res.status(200).json({
         data: {
@@ -735,7 +735,8 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
             id: m.id, type: m.type, summary: (m.summary || m.content || '').substring(0, 100),
           })),
           suggestedNextSteps: [],
-          response: 'AI service temporarily unavailable. Showing matching memories above.',
+          response: `AI service encountered an error: ${errMsg}. Showing ${relevantMemories.length} matching memories above.`,
+          error: true,
         },
       });
     }
