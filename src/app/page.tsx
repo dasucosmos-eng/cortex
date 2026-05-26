@@ -76,6 +76,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useToast } from '@/hooks/use-toast'
 
 // ============================================================
 // Types
@@ -273,6 +274,10 @@ const MEMORY_TYPE_ICONS: Record<string, React.ReactNode> = {
   decision: <ListChecks size={14} />,
   reference: <Globe size={14} />,
   snippet: <Code2 size={14} />,
+  page: <Globe size={14} />,
+  note: <FileText size={14} />,
+  clip: <Code2 size={14} />,
+  selection: <ListChecks size={14} />,
 }
 
 const MEMORY_TYPE_COLORS: Record<string, string> = {
@@ -282,6 +287,10 @@ const MEMORY_TYPE_COLORS: Record<string, string> = {
   decision: 'text-amber-400 bg-amber-500/15 border-amber-500/20',
   reference: 'text-pink-400 bg-pink-500/15 border-pink-500/20',
   snippet: 'text-orange-400 bg-orange-500/15 border-orange-500/20',
+  page: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/20',
+  note: 'text-violet-400 bg-violet-500/15 border-violet-500/20',
+  clip: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/20',
+  selection: 'text-amber-400 bg-amber-500/15 border-amber-500/20',
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -405,14 +414,16 @@ function GraphCanvas({ nodes, edges, height = 300 }: { nodes: GraphNode[]; edges
   const canvasW = 800
   const canvasH = height
 
-  // Simple force-directed layout approximation
+  // Simple force-directed layout approximation (deterministic jitter)
   const positioned = nodes.map((node, i) => {
     const angle = (2 * Math.PI * i) / nodes.length
     const radius = Math.min(canvasW, canvasH) * 0.35
+    const jitterX = ((Math.sin(i * 12.9898 + 1) * 43758.5453) % 1) * 40 - 20
+    const jitterY = ((Math.sin(i * 78.233 + 5) * 43758.5453) % 1) * 40 - 20
     return {
       ...node,
-      x: canvasW / 2 + radius * Math.cos(angle) + (Math.random() - 0.5) * 40,
-      y: canvasH / 2 + radius * Math.sin(angle) + (Math.random() - 0.5) * 40,
+      x: canvasW / 2 + radius * Math.cos(angle) + jitterX,
+      y: canvasH / 2 + radius * Math.sin(angle) + jitterY,
     }
   })
 
@@ -468,6 +479,7 @@ function GraphCanvas({ nodes, edges, height = 300 }: { nodes: GraphNode[]; edges
 // ============================================================
 
 export default function DashboardPage() {
+  const { toast } = useToast()
   const [activeView, setActiveView] = useState<ViewId>('dashboard')
   const { user: firebaseUser, token: authToken, loading: authLoading, signOut: firebaseSignOut } = useFirebaseAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -596,7 +608,7 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [authToken])
 
   const fetchExecutions = useCallback(async () => {
     try {
@@ -606,7 +618,7 @@ export default function DashboardPage() {
     } catch (err) {
       console.error('Failed to fetch executions:', err)
     }
-  }, [])
+  }, [authToken])
 
   const fetchVault = useCallback(async () => {
     try {
@@ -616,7 +628,7 @@ export default function DashboardPage() {
     } catch (err) {
       console.error('Failed to fetch vault:', err)
     }
-  }, [])
+  }, [authToken])
 
   const fetchMemoriesFiltered = useCallback(async (type?: string, query?: string) => {
     try {
@@ -630,7 +642,7 @@ export default function DashboardPage() {
     } catch (err) {
       console.error('Failed to fetch memories:', err)
     }
-  }, [])
+  }, [authToken])
 
   useEffect(() => {
     fetchDashboardData()
@@ -639,7 +651,8 @@ export default function DashboardPage() {
   useEffect(() => {
     if (activeView === 'agents') fetchExecutions()
     if (activeView === 'vault') fetchVault()
-  }, [activeView, fetchExecutions, fetchVault])
+    if (activeView === 'memories') fetchMemoriesFiltered()
+  }, [activeView, fetchExecutions, fetchVault, fetchMemoriesFiltered])
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -1135,12 +1148,18 @@ export default function DashboardPage() {
             {timelineEvents.map((event, i) => (
               <motion.div key={event.id} variants={staggerItem} transition={{ delay: i * 0.03 }} className="relative">
                 <div className="absolute -left-10 top-4 w-[9px] h-[9px] rounded-full border-2 border-zinc-700 bg-zinc-900" />
-                <Card className="glass border-zinc-800/30 hover:bg-zinc-800/20 transition-all duration-200">
+                <Card
+                  className="glass border-zinc-800/30 hover:bg-zinc-800/20 transition-all duration-200 cursor-pointer"
+                  onClick={() => { if (event.url) window.open(event.url, '_blank', 'noopener,noreferrer') }}
+                >
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between mb-1">
-                      <Badge variant="outline" className="text-[9px] text-zinc-500 border-zinc-700/50 bg-transparent">
-                        {event.type.replace(/_/g, ' ')}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[9px] text-zinc-500 border-zinc-700/50 bg-transparent">
+                          {event.type.replace(/_/g, ' ')}
+                        </Badge>
+                        {event.url && <ExternalLink size={10} className="text-zinc-600" />}
+                      </div>
                       <span className="text-[9px] text-zinc-600">{formatTimeAgo(event.createdAt)}</span>
                     </div>
                     <p className="text-xs text-zinc-300">{event.title}</p>
@@ -1172,12 +1191,11 @@ export default function DashboardPage() {
           </SelectTrigger>
           <SelectContent className="bg-zinc-900 border-zinc-800">
             <SelectItem value="all" className="text-zinc-300 text-xs">All Types</SelectItem>
+            <SelectItem value="page" className="text-zinc-300 text-xs">Page</SelectItem>
+            <SelectItem value="note" className="text-zinc-300 text-xs">Note</SelectItem>
+            <SelectItem value="clip" className="text-zinc-300 text-xs">Clip</SelectItem>
+            <SelectItem value="selection" className="text-zinc-300 text-xs">Selection</SelectItem>
             <SelectItem value="general" className="text-zinc-300 text-xs">General</SelectItem>
-            <SelectItem value="code" className="text-zinc-300 text-xs">Code</SelectItem>
-            <SelectItem value="research" className="text-zinc-300 text-xs">Research</SelectItem>
-            <SelectItem value="decision" className="text-zinc-300 text-xs">Decision</SelectItem>
-            <SelectItem value="reference" className="text-zinc-300 text-xs">Reference</SelectItem>
-            <SelectItem value="snippet" className="text-zinc-300 text-xs">Snippet</SelectItem>
           </SelectContent>
         </Select>
         <div className="relative flex-1 max-w-xs">
@@ -1514,7 +1532,28 @@ export default function DashboardPage() {
             </div>
             <div className="flex gap-2">
               <Button onClick={() => { setShowCreateAgentDialog(false); setNewAgentType(''); setNewAgentName('') }} variant="outline" className="border-zinc-700/50 text-zinc-400 text-xs">Cancel</Button>
-              <Button onClick={() => { setShowCreateAgentDialog(false); setNewAgentType(''); setNewAgentName('') }} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">Create</Button>
+              <Button onClick={async () => {
+                if (!newAgentType) {
+                  toast({ title: 'Please select an agent type', variant: 'destructive' })
+                  return
+                }
+                try {
+                  const res = await fetch('/api/agents', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders(authToken) },
+                    body: JSON.stringify({ type: newAgentType, name: newAgentName || newAgentType }),
+                  })
+                  if (res.ok) {
+                    toast({ title: 'Agent created successfully' })
+                    fetchDashboardData()
+                  } else {
+                    toast({ title: 'Failed to create agent', variant: 'destructive' })
+                  }
+                } catch {
+                  toast({ title: 'Failed to create agent', variant: 'destructive' })
+                }
+                setShowCreateAgentDialog(false); setNewAgentType(''); setNewAgentName('')
+              }} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">Create</Button>
             </div>
           </div>
         </Card>
@@ -1661,10 +1700,33 @@ export default function DashboardPage() {
             </div>
             <div className="flex gap-2">
               <Button onClick={() => { setShowAddVaultDialog(false); setNewVaultItem({ name: '', type: 'API Key', value: '', tags: '' }) }} variant="outline" className="border-zinc-700/50 text-zinc-400 text-xs">Cancel</Button>
-              <Button onClick={() => {
+              <Button onClick={async () => {
+                if (!newVaultItem.name) {
+                  toast({ title: 'Please enter a name', variant: 'destructive' })
+                  return
+                }
+                try {
+                  const res = await fetch('/api/vault', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders(authToken) },
+                    body: JSON.stringify({
+                      name: newVaultItem.name,
+                      type: newVaultItem.type,
+                      value: newVaultItem.value,
+                      tags: newVaultItem.tags.split(',').map(t => t.trim()).filter(Boolean),
+                    }),
+                  })
+                  if (res.ok) {
+                    toast({ title: 'Added to vault' })
+                    fetchVault()
+                  } else {
+                    toast({ title: 'Failed to save vault item', variant: 'destructive' })
+                  }
+                } catch {
+                  toast({ title: 'Failed to save vault item', variant: 'destructive' })
+                }
                 setShowAddVaultDialog(false)
                 setNewVaultItem({ name: '', type: 'API Key', value: '', tags: '' })
-                fetchVault()
               }} className="bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">Save</Button>
             </div>
           </div>
@@ -1995,6 +2057,22 @@ export default function DashboardPage() {
                 onCheckedChange={(v) => setSettings((s) => ({ ...s, notifications: v }))}
               />
             </div>
+            <Button onClick={async () => {
+              try {
+                const res = await fetch('/api/settings', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders(authToken) },
+                  body: JSON.stringify(settings),
+                })
+                if (res.ok) {
+                  toast({ title: 'Settings saved successfully' })
+                } else {
+                  toast({ title: 'Failed to save settings', variant: 'destructive' })
+                }
+              } catch {
+                toast({ title: 'Failed to save settings', variant: 'destructive' })
+              }
+            }} className="w-full bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 border border-violet-500/20 text-xs">Save Settings</Button>
           </div>
         </CardContent>
       </Card>
@@ -2047,13 +2125,19 @@ export default function DashboardPage() {
             <Button variant="outline" className="border-red-500/20 text-red-400 text-xs hover:bg-red-500/10" onClick={async () => {
               if (!confirm('Are you sure you want to clear all your data? This cannot be undone.')) return
               try {
-                await Promise.all([
-                  fetch('/api/memories', { method: 'DELETE', headers: getAuthHeaders(authToken) }).catch(() => {}),
-                  fetch('/api/sessions', { method: 'DELETE', headers: getAuthHeaders(authToken) }).catch(() => {}),
-                  fetch('/api/timeline', { method: 'DELETE', headers: getAuthHeaders(authToken) }).catch(() => {}),
-                ])
-                window.location.reload()
-              } catch {}
+                const res = await fetch('/api/data/clear', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders(authToken) },
+                })
+                if (res.ok) {
+                  toast({ title: 'All data cleared successfully' })
+                  window.location.reload()
+                } else {
+                  toast({ title: 'Failed to clear data', variant: 'destructive' })
+                }
+              } catch {
+                toast({ title: 'Failed to clear data', variant: 'destructive' })
+              }
             }}>
               <Trash2 size={12} className="mr-1.5" /> Clear All Data
             </Button>

@@ -514,7 +514,11 @@ export const apiMemories = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  const snap = await adminDb.collection('users').doc(uid).collection('memories').orderBy('createdAt', 'desc').limit(50).get();
+  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
+  let query = adminDb.collection('users').doc(uid).collection('memories').orderBy('createdAt', 'desc');
+  const type = req.query.type as string;
+  if (type) query = query.where('type', '==', type);
+  const snap = await query.limit(limit).get();
   const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   emptyDataResponse(req, res, data);
 });
@@ -524,7 +528,8 @@ export const apiSessions = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  const snap = await adminDb.collection('users').doc(uid).collection('sessions').orderBy('startTime', 'desc').limit(20).get();
+  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 200);
+  const snap = await adminDb.collection('users').doc(uid).collection('sessions').orderBy('startTime', 'desc').limit(limit).get();
   const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   emptyDataResponse(req, res, data);
 });
@@ -535,7 +540,8 @@ export const apiTimeline = https.onRequest(async (req: any, res: any) => {
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const snap = await adminDb.collection('users').doc(uid).collection('timelines').orderBy('timestamp', 'desc').limit(50).get();
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
+    const snap = await adminDb.collection('users').doc(uid).collection('timelines').orderBy('timestamp', 'desc').limit(limit).get();
     const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     emptyDataResponse(req, res, data);
   } catch { emptyDataResponse(req, res, []); }
@@ -596,11 +602,29 @@ export const apiContextCapsule = https.onRequest(async (req: any, res: any) => {
   } catch { emptyDataResponse(req, res, { currentSession: null }); }
 });
 
-// GET /api/knowledge-graph
+// GET|POST /api/knowledge-graph
 export const apiKnowledgeGraph = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  // On POST: clear and rebuild
+  if (req.method === 'POST') {
+    try {
+      const collections = ['memories', 'sessions', 'timelines', 'projects'];
+      for (const col of collections) {
+        const snap = await adminDb.collection('users').doc(uid).collection(col).get();
+        if (!snap.empty) {
+          const batch = adminDb.batch();
+          snap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      }
+    } catch (err) {
+      console.error('Clear error during rebuild:', err);
+    }
+  }
+
   try {
     const memSnap = await adminDb.collection('users').doc(uid).collection('memories').limit(200).get();
     const memories = memSnap.docs.map(d => ({ id: d.id, ...d.data() } as Record<string, any>));
@@ -650,12 +674,44 @@ export const apiKnowledgeGraph = https.onRequest(async (req: any, res: any) => {
   } catch { emptyDataResponse(req, res, { nodes: [], edges: [] }); }
 });
 
-// GET /api/agents
+// GET|POST /api/agents
+const BUILT_IN_AGENTS = [
+  { type: 'research', name: 'Research Assistant', description: 'Deep research across your memories and the web', capabilities: ['search', 'analyze', 'summarize'], model: 'gpt-4o-mini', stats: { total: 0, success: 0, failed: 0, avgDuration: 0 } },
+  { type: 'coding', name: 'Knowledge Builder', description: 'Build knowledge graphs from code and documentation', capabilities: ['parse', 'link', 'structure'], model: 'gpt-4o-mini', stats: { total: 0, success: 0, failed: 0, avgDuration: 0 } },
+  { type: 'summarization', name: 'Summarizer', description: 'Create concise summaries of long content', capabilities: ['summarize', 'extract', 'condense'], model: 'gpt-4o-mini', stats: { total: 0, success: 0, failed: 0, avgDuration: 0 } },
+  { type: 'curator', name: 'Memory Curator', description: 'Organize and curate your memory collection', capabilities: ['organize', 'tag', 'categorize'], model: 'gpt-4o-mini', stats: { total: 0, success: 0, failed: 0, avgDuration: 0 } },
+  { type: 'debugging', name: 'Debug Assistant', description: 'Help debug issues in your workflow', capabilities: ['diagnose', 'suggest', 'fix'], model: 'gpt-4o-mini', stats: { total: 0, success: 0, failed: 0, avgDuration: 0 } },
+  { type: 'connector', name: 'Link Connector', description: 'Find connections between unrelated memories', capabilities: ['connect', 'relate', 'discover'], model: 'gpt-4o-mini', stats: { total: 0, success: 0, failed: 0, avgDuration: 0 } },
+];
+
 export const apiAgents = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  emptyDataResponse(req, res, { agents: [] });
+
+  if (req.method === 'POST') {
+    const { type, name } = req.body || {};
+    if (!type || !name) return res.status(400).json({ error: 'Type and name are required' });
+    await adminDb.collection('users').doc(uid).collection('customAgents').doc(type).set({
+      type, name, createdAt: new Date().toISOString(),
+    });
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(200).json({ success: true });
+  }
+
+  // GET: return built-in + custom agents
+  let customAgents: any[] = [];
+  try {
+    const snap = await adminDb.collection('users').doc(uid).collection('customAgents').get();
+    customAgents = snap.docs.map(d => ({
+      type: d.data().type, name: d.data().name,
+      description: `Custom agent: ${d.data().name}`,
+      capabilities: ['custom'], model: 'gpt-4o-mini',
+      stats: { total: 0, success: 0, failed: 0, avgDuration: 0 },
+    }));
+  } catch { /* ignore */ }
+
+  emptyDataResponse(req, res, { agents: [...BUILT_IN_AGENTS, ...customAgents] });
 });
 
 // GET /api/agents/executions
@@ -713,11 +769,26 @@ export const apiSearch = https.onRequest(async (req: any, res: any) => {
   } catch { emptyDataResponse(req, res, { results: [], total: 0 }); }
 });
 
-// GET /api/vault
+// GET|POST /api/vault
 export const apiVault = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  if (req.method === 'POST') {
+    const { name, type, value, tags } = req.body || {};
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    const docRef = adminDb.collection('users').doc(uid).collection('vault').doc();
+    await docRef.set({
+      name, type: type || 'Note', value: value || '', tags: tags || [],
+      label: name, domain: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(200).json({ success: true, id: docRef.id });
+  }
+
   try {
     const snap = await adminDb.collection('users').doc(uid).collection('vault').orderBy('createdAt', 'desc').limit(50).get();
     const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -883,5 +954,61 @@ export const apiAiRecall = https.onRequest(async (req: any, res: any) => {
     console.error('AI recall error:', error);
     res.set(corsHeaders(req.headers?.origin));
     return res.status(500).json({ error: 'AI recall failed' });
+  }
+});
+
+// ============================
+// POST /api/data/clear
+// Clears all user data from Firestore
+// ============================
+export const apiDataClear = https.onRequest(async (req: any, res: any) => {
+  if (handleCors(req, res)) return;
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const uid = await verifyUser(req);
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const collections = ['memories', 'sessions', 'timelines', 'projects', 'vault', 'customAgents'];
+    for (const col of collections) {
+      const snap = await adminDb.collection('users').doc(uid).collection(col).get();
+      if (!snap.empty) {
+        const batch = adminDb.batch();
+        snap.docs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+    }
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(200).json({ success: true, message: 'All data cleared' });
+  } catch (error: any) {
+    console.error('Clear data error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================
+// POST /api/settings
+// Saves user privacy/settings preferences
+// ============================
+export const apiSettings = https.onRequest(async (req: any, res: any) => {
+  if (handleCors(req, res)) return;
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const uid = await verifyUser(req);
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const { trackBrowsing, autoCapture, sensitiveFilter, notifications, dataRetention } = req.body || {};
+    await adminDb.collection('users').doc(uid).collection('settings').doc('preferences').set({
+      trackBrowsing: trackBrowsing ?? true,
+      autoCapture: autoCapture ?? true,
+      sensitiveFilter: sensitiveFilter ?? true,
+      notifications: notifications ?? false,
+      dataRetention: dataRetention ?? '90',
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    res.set(corsHeaders(req.headers?.origin));
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    console.error('Settings error:', error);
+    return res.status(500).json({ error: error.message });
   }
 });
