@@ -423,7 +423,7 @@
 
   function openDashboard() {
     chrome.tabs.create({
-      url: chrome.runtime.getURL('sidebar/index.html'),
+      url: 'https://memora.bond',
     });
     window.close();
   }

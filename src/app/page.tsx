@@ -726,10 +726,10 @@ export default function DashboardPage() {
   // Today's stats computed
   // ============================================================
 
-  const todaySessions = sessions.filter((s) => isToday(s.startedAt))
-  const todayMemories = memories.filter((m) => isToday(m.createdAt))
+  const todaySessions = sessions.filter((s) => isToday(s.startedAt || s.startTime))
+  const todayMemories = memories.filter((m) => isToday(m.createdAt || m.firstVisited))
   const todayTimeline = (contextCapsule?.todaysTimeline || []).length
-  const activeSessions = sessions.filter((s) => s.isActive)
+  const activeSessions = sessions.filter((s) => s.isActive || s.status === 'active')
 
   // ============================================================
   // View Renderers
@@ -932,9 +932,9 @@ export default function DashboardPage() {
                     </div>
                     {session.task && <p className="text-xs text-zinc-500 pl-4 mb-2">{session.task}</p>}
                     <div className="flex items-center gap-3 text-[10px] text-zinc-600 pl-4">
-                      {session.project && <span className="flex items-center gap-1"><FolderKanban size={9} />{session.project}</span>}
-                      <span>{session.memoryCount} memories</span>
-                      <span>{formatTimeAgo(session.startedAt)}</span>
+                      {(session.project || session.domains?.[0]) && <span className="flex items-center gap-1"><FolderKanban size={9} />{session.project || (session.domains || [])[0]}</span>}
+                      <span>{session.memoryCount || session.pageViews || 0} pages</span>
+                      <span>{formatTimeAgo(session.startedAt || session.startTime)}</span>
                     </div>
                   </div>
                 ))}
@@ -969,7 +969,7 @@ export default function DashboardPage() {
                           {memory.title || 'Untitled Memory'}
                         </p>
                         <p className="text-[11px] text-zinc-500 line-clamp-1 mt-0.5">
-                          {memory.summary || memory.content.substring(0, 80)}
+                          {memory.summary || memory.content || memory.textPreview || memory.description || ''}
                         </p>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[9px] text-zinc-600">{formatTimeAgo(memory.createdAt)}</span>
@@ -1050,16 +1050,16 @@ export default function DashboardPage() {
                         {session.isActive && <Badge className="text-[9px] border-0 bg-emerald-500/15 text-emerald-400">ACTIVE</Badge>}
                       </div>
                       {session.task && <p className="text-xs text-zinc-400 mb-1">{session.task}</p>}
-                      {session.project && (
+                      {(session.project || session.domains?.[0]) && (
                         <Badge variant="outline" className="text-[9px] text-zinc-500 border-zinc-700/50 bg-transparent mr-2">
-                          <FolderKanban size={9} className="mr-1" />{session.project}
+                          <FolderKanban size={9} className="mr-1" />{session.project || (session.domains || [])[0]}
                         </Badge>
                       )}
                       <div className="flex items-center gap-4 mt-2 text-[10px] text-zinc-600">
-                        <span>{session.memoryCount} memories</span>
-                        <span>{session.timelineCount} events</span>
-                        <span>{formatTimeAgo(session.startedAt)}</span>
-                        {session.endedAt && <span>Ended {formatTimeAgo(session.endedAt)}</span>}
+                        <span>{session.memoryCount || session.pageViews || 0} pages</span>
+                        <span>{session.timelineCount || 0} events</span>
+                        <span>{formatTimeAgo(session.startedAt || session.startTime)}</span>
+                        {(session.endedAt || session.endTime) && <span>Ended {formatTimeAgo(session.endedAt || session.endTime)}</span>}
                       </div>
                     </div>
                   </div>
@@ -1214,7 +1214,7 @@ export default function DashboardPage() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-xs text-zinc-400 line-clamp-2">{memory.summary || memory.content.substring(0, 150)}</p>
+                        <p className="text-xs text-zinc-400 line-clamp-2">{memory.summary || (memory.content || memory.textPreview || memory.description || '').substring(0, 150)}</p>
                         <div className="flex items-center flex-wrap gap-2 mt-2">
                           <span className="text-[9px] text-zinc-600">{formatTimeAgo(memory.createdAt)}</span>
                           {memory.domain && (
@@ -1914,11 +1914,24 @@ export default function DashboardPage() {
                 </>
               )}
               {!subscriptionData.isLocked && (
-                <a href={`/api/paypal/create-subscription`} target="_blank" rel="noopener noreferrer">
-                  <Button className="w-full bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer text-xs">
-                    {subscriptionData.isTrial ? 'Upgrade to Pro — $12/month' : 'Manage Subscription'}
-                  </Button>
-                </a>
+                <Button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/paypal/create-subscription', { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders(authToken) } })
+                      const json = await res.json()
+                      if (json.approveUrl) {
+                        window.open(json.approveUrl, '_blank', 'noopener,noreferrer')
+                      } else {
+                        window.location.reload()
+                      }
+                    } catch (err) {
+                      console.error('Subscription error:', err)
+                    }
+                  }}
+                  className="w-full bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-200 cursor-pointer text-xs"
+                >
+                  {subscriptionData.isTrial ? 'Upgrade to Pro — $12/month' : 'Manage Subscription'}
+                </Button>
               )}
             </div>
           ) : subscriptionError ? (

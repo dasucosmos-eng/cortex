@@ -534,7 +534,11 @@ export const apiTimeline = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  emptyDataResponse(req, res, []);
+  try {
+    const snap = await adminDb.collection('users').doc(uid).collection('timelines').orderBy('timestamp', 'desc').limit(50).get();
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    emptyDataResponse(req, res, data);
+  } catch { emptyDataResponse(req, res, []); }
 });
 
 // GET /api/projects
@@ -552,7 +556,44 @@ export const apiContextCapsule = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  emptyDataResponse(req, res, { currentSession: null });
+  try {
+    // Get active sessions
+    const sessSnap = await adminDb.collection('users').doc(uid).collection('sessions')
+      .where('status', '==', 'active').limit(1).get();
+    const activeSession = sessSnap.docs[0]?.data() || null;
+
+    // Get today's timeline
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const tlSnap = await adminDb.collection('users').doc(uid).collection('timelines')
+      .where('timestamp', '>=', todayStart.toISOString()).orderBy('timestamp', 'desc').limit(20).get();
+    const todaysTimeline = tlSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Get recent memories
+    const memSnap = await adminDb.collection('users').doc(uid).collection('memories')
+      .orderBy('createdAt', 'desc').limit(5).get();
+    const recentMemories = memSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const data = {
+      currentSession: activeSession ? {
+        id: activeSession.id,
+        title: activeSession.title,
+        task: activeSession.task || null,
+        intent: activeSession.intent || null,
+        project: activeSession.domains?.[0] || null,
+        startedAt: activeSession.startTime || activeSession.startedAt,
+        memoryCount: activeSession.pageViews || 0,
+      } : null,
+      todaysTimeline,
+      summary: {
+        activeSessionTitle: activeSession?.title || null,
+        projectName: activeSession?.domains?.[0] || null,
+        recentMemoryCount: recentMemories.length,
+        todayEventCount: todaysTimeline.length,
+        hasSensitiveData: false,
+      },
+    };
+    emptyDataResponse(req, res, data);
+  } catch { emptyDataResponse(req, res, { currentSession: null }); }
 });
 
 // GET /api/knowledge-graph
@@ -560,7 +601,53 @@ export const apiKnowledgeGraph = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  emptyDataResponse(req, res, { nodes: [], edges: [] });
+  try {
+    const memSnap = await adminDb.collection('users').doc(uid).collection('memories').limit(200).get();
+    const memories = memSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const nodeMap = new Map<string, { id: string; type: string; label: string }>();
+    const edges: Array<{ fromId: string; toId: string; type: string; strength: number }> = [];
+    const edgeSet = new Set<string>();
+
+    for (const mem of memories) {
+      // Add memory node
+      const nodeId = mem.id;
+      if (!nodeMap.has(nodeId)) {
+        nodeMap.set(nodeId, { id: nodeId, type: 'memory', label: mem.title || 'Untitled' });
+      }
+      // Add domain node
+      if (mem.domain) {
+        if (!nodeMap.has(mem.domain)) {
+          nodeMap.set(mem.domain, { id: mem.domain, type: 'domain', label: mem.domain });
+        }
+        const edgeKey = `${nodeId}->${mem.domain}`;
+        if (!edgeSet.has(edgeKey)) {
+          edgeSet.add(edgeKey);
+          edges.push({ fromId: nodeId, toId: mem.domain, type: 'belongs_to', strength: 0.8 });
+ }
+      }
+      // Add tags as nodes
+      const tags: string[] = mem.tags || [];
+      for (const tag of tags.slice(0, 5)) {
+        const tagId = `tag_${tag}`;
+        if (!nodeMap.has(tagId)) {
+          nodeMap.set(tagId, { id: tagId, type: 'tag', label: tag });
+        }
+        const edgeKey2 = `${nodeId}->${tagId}`;
+        if (!edgeSet.has(edgeKey2)) {
+          edgeSet.add(edgeKey2);
+          edges.push({ fromId: nodeId, toId: tagId, type: 'tagged_with', strength: 0.6 });
+ }
+      }
+    }
+
+    emptyDataResponse(req, res, {
+      nodeCount: nodeMap.size,
+      edgeCount: edges.length,
+      nodes: Array.from(nodeMap.values()),
+      edges,
+    });
+  } catch { emptyDataResponse(req, res, { nodes: [], edges: [] }); }
 });
 
 // GET /api/agents
@@ -584,7 +671,46 @@ export const apiSearch = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  emptyDataResponse(req, res, { results: [], total: 0 });
+  try {
+    const q = (req.query.q || '').toString().toLowerCase().trim();
+    if (!q) return emptyDataResponse(req, res, { results: [], total: 0 });
+    const terms = q.split(/\s+/).filter(t => t.length > 1);
+
+    const memSnap = await adminDb.collection('users').doc(uid).collection('memories').limit(200).get();
+    const memories = memSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const scored = memories.map((m: any) => {
+      let score = 0;
+      const fields = [
+        (m.title || '').toLowerCase(),
+        (m.content || m.textPreview || m.description || '').toLowerCase(),
+        (m.domain || '').toLowerCase(),
+        (m.url || '').toLowerCase(),
+        (m.tags || []).join(' ').toLowerCase(),
+      ];
+      for (const term of terms) {
+        for (const field of fields) {
+          if (field.includes(term)) score += 5;
+        }
+      }
+      return { memory: m, score };
+    });
+
+    const results = scored
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 30)
+      .map(item => ({
+        id: item.memory.id,
+        type: 'memory',
+        title: item.memory.title || 'Untitled',
+        content: (item.memory.content || item.memory.textPreview || item.memory.description || '').substring(0, 200),
+        score: Math.min(item.score / 50, 1),
+        createdAt: item.memory.createdAt || item.memory.syncedAt || '',
+      }));
+
+    emptyDataResponse(req, res, { results, total: results.length });
+  } catch { emptyDataResponse(req, res, { results: [], total: 0 }); }
 });
 
 // GET /api/vault
@@ -592,7 +718,11 @@ export const apiVault = https.onRequest(async (req: any, res: any) => {
   if (handleCors(req, res)) return;
   const uid = await verifyUser(req);
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-  emptyDataResponse(req, res, []);
+  try {
+    const snap = await adminDb.collection('users').doc(uid).collection('vault').orderBy('createdAt', 'desc').limit(50).get();
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    emptyDataResponse(req, res, data);
+  } catch { emptyDataResponse(req, res, []); }
 });
 
 // POST & PUT /api/sync
@@ -609,11 +739,20 @@ export const apiSync = https.onRequest(async (req: any, res: any) => {
         const batch = adminDb.batch();
         for (const change of changes) {
           if (!change.type || !change.data) continue;
-          const docRef = adminDb.collection('users').doc(uid).collection(change.type + 's').doc();
+          // Map type to correct Firestore collection name
+          let collectionName: string;
+          switch (change.type) {
+            case 'memory': collectionName = 'memories'; break;
+            case 'session': collectionName = 'sessions'; break;
+            case 'timeline': collectionName = 'timelines'; break;
+            default: collectionName = change.type + 's';
+          }
+          const docRef = adminDb.collection('users').doc(uid).collection(collectionName).doc();
           batch.set(docRef, {
             ...change.data,
             userId: uid,
             deviceId: deviceId || null,
+            createdAt: change.data.createdAt || change.data.firstVisited || change.data.startTime || change.data.timestamp || new Date().toISOString(),
             syncedAt: new Date().toISOString(),
           });
         }
