@@ -30,7 +30,7 @@ function getCookieDomain() {
 function setMemoraCookie(token: string | null) {
   const domain = getCookieDomain()
   if (token) {
-    document.cookie = `memora_token=${token}; path=/; domain=${domain}; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+    document.cookie = `memora_token=${token}; path=/; domain=${domain}; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`
   } else {
     document.cookie = `memora_token=; path=/; domain=${domain}; max-age=0`
   }

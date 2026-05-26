@@ -26,7 +26,16 @@ export default function LoginPageInner() {
     localStorage.setItem('memora_token', idToken)
 
     // Set cookie so extension can read it
-    document.cookie = `memora_token=${idToken}; path=/; domain=.${window.location.hostname.split('.').slice(-2).join('.')}; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+    // Set cookie so extension can read it
+    // Use the correct domain: for web.app/firebaseapp.com use full hostname, otherwise use parent domain
+    const hostname = window.location.hostname
+    const parts = hostname.split('.')
+    const knownPlatforms = ['web.app', 'firebaseapp.com', 'cloudfunctions.net', 'supabase.co']
+    const tld = parts.slice(-2).join('.')
+    const cookieDomain = knownPlatforms.includes(tld) && parts.length > 2
+      ? hostname
+      : '.' + tld
+    document.cookie = `memora_token=${idToken}; path=/; domain=${cookieDomain}; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`
 
     // POST to backend to create/update user record
     try {
