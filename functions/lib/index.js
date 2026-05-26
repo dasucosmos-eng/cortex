@@ -35,11 +35,15 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.apiSync = exports.apiVault = exports.apiSearch = exports.apiAgentExecutions = exports.apiAgents = exports.apiKnowledgeGraph = exports.apiContextCapsule = exports.apiProjects = exports.apiTimeline = exports.apiSessions = exports.apiMemories = exports.apiAuthExtensionToken = exports.apiPaypalCancel = exports.apiPaypalReturn = exports.apiPaypalWebhook = exports.apiPaypalCreateSubscription = exports.apiPaypalSubscriptionStatus = exports.apiAuthFingerprint = exports.apiAuthSession = exports.apiAuthGoogle = void 0;
+exports.apiAiRecall = exports.apiSync = exports.apiVault = exports.apiSearch = exports.apiAgentExecutions = exports.apiAgents = exports.apiKnowledgeGraph = exports.apiContextCapsule = exports.apiProjects = exports.apiTimeline = exports.apiSessions = exports.apiMemories = exports.apiAuthExtensionToken = exports.apiPaypalCancel = exports.apiPaypalReturn = exports.apiPaypalWebhook = exports.apiPaypalCreateSubscription = exports.apiPaypalSubscriptionStatus = exports.apiAuthFingerprint = exports.apiAuthSession = exports.apiAuthGoogle = void 0;
 const v2_1 = require("firebase-functions/v2");
 const v2_2 = require("firebase-functions/v2");
 const admin = __importStar(require("firebase-admin"));
+const z_ai_web_dev_sdk_1 = __importDefault(require("z-ai-web-dev-sdk"));
 (0, v2_2.setGlobalOptions)({ region: 'us-central1', minInstances: 0 });
 // Initialize Firebase Admin
 if (!admin.apps.length) {
@@ -664,3 +668,93 @@ async function getPayPalAccessToken() {
         return null;
     }
 }
+// ============================
+// POST /api/ai/recall
+// AI recall endpoint — retrieves relevant context using ZAI
+// ============================
+exports.apiAiRecall = v2_1.https.onRequest(async (req, res) => {
+    if (handleCors(req, res))
+        return;
+    if (req.method !== 'POST')
+        return res.status(405).json({ error: 'Method not allowed' });
+    try {
+        const uid = await verifyUser(req);
+        if (!uid)
+            return res.status(401).json({ error: 'Unauthorized' });
+        const { query } = req.body || {};
+        if (!query || typeof query !== 'string' || query.trim().length === 0) {
+            return res.status(400).json({ error: 'Query is required' });
+        }
+        // Search user's memories
+        const memoriesSnap = await adminDb
+            .collection('users').doc(uid).collection('memories')
+            .orderBy('createdAt', 'desc').limit(50).get();
+        const allMemories = memoriesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const searchTerms = query.trim().split(/\s+/).map(t => t.toLowerCase());
+        const relevantMemories = allMemories.filter((m) => {
+            const text = [m.content, m.summary, m.title, m.tags]
+                .filter(Boolean).join(' ').toLowerCase();
+            return searchTerms.some(term => text.includes(term));
+        }).slice(0, 10);
+        const memoryContext = relevantMemories
+            .map((m) => `[${m.type || 'page'}] ${m.title || 'Untitled'}: ${(m.summary || m.content || '').substring(0, 200)}`)
+            .join('\n');
+        try {
+            const zai = await z_ai_web_dev_sdk_1.default.create();
+            const completion = await zai.chat.completions.create({
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are Memora Bond's AI memory assistant. Based on the user's query and their browsing memories, provide a helpful response. Be concise and specific. If no relevant memories are found, say so honestly.`,
+                    },
+                    {
+                        role: 'user',
+                        content: `Query: ${query.trim()}\n\nMy browsing memories:\n${memoryContext || 'No memories found.'}`,
+                    },
+                ],
+            });
+            const aiContent = completion.choices?.[0]?.message?.content || 'No response generated.';
+            // Try to parse as JSON, otherwise return as text
+            let parsed;
+            try {
+                const jsonMatch = aiContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+                const jsonStr = jsonMatch ? jsonMatch[1] : aiContent;
+                parsed = JSON.parse(jsonStr.trim());
+            }
+            catch {
+                parsed = {
+                    currentProject: null,
+                    currentTask: null,
+                    relevantMemories: relevantMemories.map((m) => ({
+                        id: m.id, type: m.type, summary: (m.summary || m.content || '').substring(0, 100),
+                    })),
+                    suggestedNextSteps: [],
+                    response: aiContent,
+                };
+            }
+            res.set(corsHeaders(req.headers?.origin));
+            return res.status(200).json({ data: parsed });
+        }
+        catch (aiError) {
+            console.error('AI recall error:', aiError);
+            // Fallback: return memories without AI processing
+            res.set(corsHeaders(req.headers?.origin));
+            return res.status(200).json({
+                data: {
+                    currentProject: null,
+                    currentTask: null,
+                    relevantMemories: relevantMemories.map((m) => ({
+                        id: m.id, type: m.type, summary: (m.summary || m.content || '').substring(0, 100),
+                    })),
+                    suggestedNextSteps: [],
+                    response: 'AI service temporarily unavailable. Showing matching memories above.',
+                },
+            });
+        }
+    }
+    catch (error) {
+        console.error('AI recall error:', error);
+        res.set(corsHeaders(req.headers?.origin));
+        return res.status(500).json({ error: 'AI recall failed' });
+    }
+});

@@ -1262,12 +1262,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'SIGN_IN_WEBSITE': {
           // Open the Memora Bond login page so user can sign in with Google
           chrome.tabs.create({ url: 'https://memora.bond/login?from=extension' });
+          // Start background polling — popup will close when user clicks the new tab
+          startAuthPolling();
           sendResponse({ success: true });
           break;
         }
 
         case 'CHECK_WEBSITE_AUTH': {
-          // Check if user is now authenticated on the website (poll for cookie)
+          // Popup asks for current auth status (one-shot check)
           try {
             const cookie = await chrome.cookies.get({
               url: 'https://memora.bond',
@@ -1275,7 +1277,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             if (cookie && cookie.value) {
               await authenticate(cookie.value);
-              sendResponse({ success: true, authenticated: true });
+              sendResponse({ success: true, authenticated: AUTH_STATE.isAuthenticated });
             } else {
               sendResponse({ success: true, authenticated: false });
             }
@@ -1581,6 +1583,41 @@ chrome.action.onClicked.addListener(async (tab) => {
   // So this is a fallback
   await chrome.sidePanel.open({ windowId: tab.windowId });
 });
+
+// ===== AUTH POLLING (Background) =====
+// The popup closes when the user clicks the login tab, so polling must happen here.
+
+let _authPollingActive = false;
+
+async function startAuthPolling() {
+  if (_authPollingActive) return; // Already polling
+  _authPollingActive = true;
+  console.log('[Memora Bond] Starting background auth polling...');
+
+  for (let i = 0; i < 150; i++) { // 5 minutes max (150 * 2s)
+    try {
+      const cookie = await chrome.cookies.get({
+        url: 'https://memora.bond',
+        name: 'memora_token',
+      });
+      if (cookie && cookie.value) {
+        console.log('[Memora Bond] Found memora_token cookie, authenticating...');
+        const result = await authenticate(cookie.value);
+        if (result.success) {
+          console.log('[Memora Bond] Extension authenticated via website sign-in!');
+          _authPollingActive = false;
+          return;
+        }
+      }
+    } catch (err) {
+      console.log('[Memora Bond] Auth poll error:', err.message);
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  console.log('[Memora Bond] Auth polling timed out');
+  _authPollingActive = false;
+}
 
 // ===== AUTH MODULE =====
 

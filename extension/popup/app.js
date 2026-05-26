@@ -202,23 +202,13 @@
 
   async function handleSignIn() {
     if (els.signInBtn) els.signInBtn.disabled = true;
+    // Background service worker handles polling — popup will close when tab opens
     await sendMessage('SIGN_IN_WEBSITE');
-  }
-
-  async function pollForAuth() {
-    // Poll every 2 seconds for 60 seconds to check if user signed in on website
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 2000));
-      const response = await sendMessage('CHECK_WEBSITE_AUTH');
-      if (response.success && response.authenticated) {
-        els.authDot.className = 'indicator-dot online';
-        els.authStatusText.textContent = 'Connected';
-        if (els.signInBtn) els.signInBtn.style.display = 'none';
-        await loadAuthAndSync();
-        return;
-      }
+    // Update button text to inform user
+    if (els.signInBtn) {
+      els.signInBtn.textContent = 'Sign in on the new tab...';
+      els.signInBtn.disabled = false;
     }
-    if (els.signInBtn) els.signInBtn.disabled = false;
   }
 
   async function handleSyncNow() {
@@ -489,7 +479,7 @@
   });
   if (els.settingsDisconnectBtn) els.settingsDisconnectBtn.addEventListener('click', handleDisconnect);
   if (els.settingsOpenWebBtn) els.settingsOpenWebBtn.addEventListener('click', openWebSettings);
-  if (els.signInBtn) els.signInBtn.addEventListener('click', () => { handleSignIn(); pollForAuth(); });
+  if (els.signInBtn) els.signInBtn.addEventListener('click', handleSignIn);
 
   // ===== INIT =====
   loadStatus();
