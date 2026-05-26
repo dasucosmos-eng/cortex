@@ -1,0 +1,3 @@
+{
+  "/api/paypal/return/route": "app/api/paypal/return/route.js"
+}

@@ -1,0 +1,3 @@
+{
+  "/api/paypal/subscription-status/route": "app/api/paypal/subscription-status/route.js"
+}
